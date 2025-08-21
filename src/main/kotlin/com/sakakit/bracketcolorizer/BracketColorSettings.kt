@@ -97,17 +97,21 @@ class BracketColorSettings : PersistentStateComponent<BracketColorSettings.State
         /**
          * サポートするネストレベル数。
          */
-        const val LEVEL_COUNT = 5
+        const val LEVEL_COUNT = 9
 
         /**
          * デフォルトの色（16進表記）リストを返します。
          */
         fun defaultHexColors(): List<String> = listOf(
-            "#CC7832", // orange
-            "#9876AA", // purple
-            "#6897BB", // blue
-            "#6A8759", // green
-            "#BBB529"  // yellow
+            "#FF8C00", // Level1: DarkOrange
+            "#EE82EE", // Level2: Violet
+            "#9ACD32", // Level3: YellowGreen
+            "#7B68EE", // Level4: MediumSlateBlue
+            "#DAA520", // Level5: Goldenrod
+            "#4169E1", // Level6: RoyalBlue
+            "#FF00FF", // Level7: Fuchsia
+            "#00CED1", // Level8: DarkTurquoise
+            "#3CB371"  // Level9: MediumSeaGreen
         )
 
         /**
