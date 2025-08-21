@@ -10,10 +10,12 @@ import com.intellij.openapi.editor.event.EditorFactoryListener
 import com.intellij.openapi.editor.markup.HighlighterLayer
 import com.intellij.openapi.editor.markup.HighlighterTargetArea
 import com.intellij.openapi.editor.markup.RangeHighlighter
+import com.intellij.openapi.fileEditor.FileDocumentManagerListener
 import com.intellij.openapi.fileTypes.SyntaxHighlighter
 import com.intellij.openapi.fileTypes.SyntaxHighlighterFactory
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.tree.IElementType
 import java.util.concurrent.ConcurrentHashMap
@@ -22,6 +24,8 @@ import java.util.concurrent.ConcurrentHashMap
  * エディタの生成/破棄およびドキュメント変更をフックし、
  * ブラケットへのレンジハイライトを更新するリスナー。
  *
+ * Git 操作などによる外部再読込で色付けが消える問題に対処します。
+ *
  * Annotator を使わない手動ハイライト版。SyntaxHighlighter を用いて
  * コメント/文字列/ドキュメントを除外し、ネストレベルに応じた色を適用します。
  */
@@ -29,8 +33,25 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
     private val highlightersMap = ConcurrentHashMap<Document, MutableList<RangeHighlighter>>()
     private val listenersMap = ConcurrentHashMap<Document, MutableList<DocumentListener>>()
 
+    init {
+        // Git 操作などによる外部再読込で色付けが消える問題への対処
+        ApplicationManager.getApplication().messageBus.connect()
+            .subscribe(FileDocumentManagerListener.TOPIC, object : FileDocumentManagerListener {
+                override fun fileContentReloaded(file: VirtualFile, document: Document) {
+                    ApplicationManager.getApplication().invokeLater({
+                        // 開いている全エディタに対して再ハイライト
+                        EditorFactory.getInstance().getEditors(document).forEach { editor ->
+                            val project = editor.project ?: return@forEach
+                            updateHighlights(project, document)
+                        }
+                    })
+                }
+            })
+    }
+
     /**
      * エディタが生成されたとき、ドキュメント変更リスナーを取り付けて初期ハイライトを行います。
+     * @param event エディタ生成イベント
      */
     override fun editorCreated(event: EditorFactoryEvent) {
         val editor = event.editor
@@ -52,6 +73,7 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
 
     /**
      * エディタが閉じられたとき、ハイライトとリスナーをクリーンアップします。
+     * @param event エディタ解放イベント
      */
     override fun editorReleased(event: EditorFactoryEvent) {
         val document = event.editor.document
