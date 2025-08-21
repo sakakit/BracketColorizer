@@ -6,7 +6,7 @@
 BracketColorizer は、JetBrains IntelliJ プラットフォーム系 IDE 向けのエディタ支援プラグインです。ソースコード内の括弧をネストの深さに応じて色分けし、対応関係を視覚的に把握しやすくします。
 - 対応括弧: (), [], {}, <>（< > は文脈に応じて簡易判定）
 - 仕組み: 言語プラグインが提供する SyntaxHighlighter を利用できる場合はコメント/文字列などを除外し、それ以外はテキスト走査で色付けします（言語非依存）。
-- カスタマイズ: 色のセット・最大ネスト数などを設定から調整可能。
+- カスタマイズ: 色のセットを設定から調整可能。ネストレベル数は固定（9）。
 - 目的: ネストが深いコードでも括弧の対応を素早く追えるようにし、読みやすさと保守性を向上させます。
 
 ## AI生成に関する告知
@@ -104,7 +104,7 @@ This document provides an overview of the plugin, how to build it, and instructi
 BracketColorizer is an editor-assistance plugin for JetBrains IntelliJ Platform IDEs. It colorizes brackets in source code based on nesting depth to make matching pairs easier to visually track.
 - Supported brackets: (), [], {}, <> (angle brackets are heuristically distinguished depending on context)
 - How it works: When a language plugin provides a SyntaxHighlighter, the plugin excludes comments/strings and colors brackets accordingly; otherwise it falls back to simple text scanning (language-agnostic).
-- Customization: You can adjust the color set and the maximum nesting depth in settings.
+- Customization: You can adjust the color set in settings. The number of nesting levels is fixed (9).
 - Purpose: Help you quickly follow bracket pairs even in deeply nested code, improving readability and maintainability.
 
 ## Notice about AI generation
