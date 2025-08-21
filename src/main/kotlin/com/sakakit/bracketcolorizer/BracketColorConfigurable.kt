@@ -8,7 +8,6 @@ import com.intellij.openapi.ui.DialogPanel
 import com.intellij.ui.ColorPanel
 import com.intellij.ui.JBColor
 import com.intellij.ui.dsl.builder.panel
-import java.awt.Color
 import javax.swing.JComponent
 
 /**
@@ -28,6 +27,7 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
 
     /**
      * 設定 UI のルートコンポーネントを生成します。
+     * @return 設定 UI のルートコンポーネント
      */
     override fun createComponent(): JComponent {
         if (root == null) {
@@ -45,6 +45,7 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
 
     /**
      * 画面上の選択色と保存済み設定が異なるかを判定します。
+     * @return 差分がある場合は true、なければ false
      */
     override fun isModified(): Boolean {
         val colors = settings.getColors()

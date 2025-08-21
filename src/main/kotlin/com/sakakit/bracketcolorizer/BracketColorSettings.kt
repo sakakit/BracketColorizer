@@ -50,6 +50,7 @@ class BracketColorSettings : PersistentStateComponent<BracketColorSettings.State
 
     /**
      * 設定されている各レベルの色を Color リストで返します。
+     * @return 各レベルの色を表す Color のリスト
      */
     fun getColors(): List<Color> = myState.colorsHex.map { hex -> parseHex(hex) }
 
@@ -101,6 +102,7 @@ class BracketColorSettings : PersistentStateComponent<BracketColorSettings.State
 
         /**
          * デフォルトの色（16進表記）リストを返します。
+         * @return デフォルト色の 16 進表記（#RRGGBB）リスト
          */
         fun defaultHexColors(): List<String> = listOf(
             "#FF8C00", // Level1: DarkOrange
@@ -117,6 +119,7 @@ class BracketColorSettings : PersistentStateComponent<BracketColorSettings.State
         /**
          * 16進表記の文字列から Color を生成します。失敗時は JBColor.GRAY を返します。
          * @param hex 例: "#CC7832"
+         * @return 解析に成功した Color。失敗時は JBColor.GRAY
          */
         fun parseHex(hex: String): Color = try {
             Color.decode(hex)
@@ -133,6 +136,7 @@ class BracketColorSettings : PersistentStateComponent<BracketColorSettings.State
 
         /**
          * サービスインスタンスを取得します。
+         * @return BracketColorSettings のシングルトンインスタンス
          */
         @JvmStatic
         fun getInstance(): BracketColorSettings = service()
