@@ -1,0 +1,36 @@
+<!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
+<idea-plugin>
+    <!-- Unique identifier of the plugin. It should be FQN. It cannot be changed between the plugin versions. -->
+    <id>com.sakakit.BracketColorizer</id>
+
+    <!-- Public plugin name should be written in Title Case.
+         Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-name -->
+    <name>BracketColorizer</name>
+
+    <!-- A displayed Vendor name or Organization ID displayed on the Plugins Page. -->
+    <vendor url="https://www.sakakit.com">sakakit</vendor>
+
+    <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
+         Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
+    <description><![CDATA[
+        Colorize Brackets, Parentheses, and Braces in the Editor.
+    ]]></description>
+
+    <!-- Product and plugin compatibility requirements.
+         Read more: https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html -->
+    <depends>com.intellij.modules.platform</depends>
+
+    <!-- Extension points defined by the plugin.
+         Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Settings -->
+        <applicationService serviceImplementation="com.sakakit.brackets.BracketColorSettings"/>
+        <applicationConfigurable instance="com.sakakit.brackets.BracketColorConfigurable" id="com.sakakit.brackets.settings" displayName="Bracket Colorizer"/>
+
+        <!-- Editor listener to draw colors in real-time across languages -->
+        <editorFactoryListener implementation="com.sakakit.brackets.BracketColorEditorListener"/>
+
+        <!-- Apply colors on startup -->
+        <postStartupActivity implementation="com.sakakit.brackets.ApplyColorsStartup"/>
+    </extensions>
+</idea-plugin>
