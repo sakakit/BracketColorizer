@@ -6,6 +6,7 @@ import com.intellij.openapi.options.SearchableConfigurable
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.ui.DialogPanel
 import com.intellij.ui.ColorPanel
+import com.intellij.ui.JBColor
 import com.intellij.ui.dsl.builder.panel
 import java.awt.Color
 import javax.swing.JComponent
@@ -48,7 +49,7 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
     override fun isModified(): Boolean {
         val colors = settings.getColors()
         for (i in 0 until BracketColorSettings.LEVEL_COUNT) {
-            val c = panels[i].selectedColor ?: Color.BLACK
+            val c = panels[i].selectedColor ?: JBColor.BLACK
             if (c.rgb != colors[i].rgb) return true
         }
         return false
@@ -59,7 +60,7 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
      */
     override fun apply() {
         for (i in 0 until BracketColorSettings.LEVEL_COUNT) {
-            settings.setColor(i, panels[i].selectedColor ?: Color.BLACK)
+            settings.setColor(i, panels[i].selectedColor ?: JBColor.BLACK)
         }
         settings.applyColorsToScheme()
         // restart daemon highlighting
