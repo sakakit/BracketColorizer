@@ -21,6 +21,8 @@ dependencies {
         create("IC", "2025.1")
         testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)
 
+        // Kotlin language plugin to enable Kotlin file support in sandbox and at runtime
+        bundledPlugin("org.jetbrains.kotlin")
         // Add necessary plugin dependencies for compilation here, example:
         // bundledPlugin("com.intellij.java")
     }

@@ -14,6 +14,8 @@
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
     <description><![CDATA[
         Colorize Brackets, Parentheses, and Braces in the Editor.
+        Language-agnostic: uses available language plugins' SyntaxHighlighter to avoid coloring inside comments/strings
+        (Kotlin/Java/C#/C/C++/Python/Rust/JavaScript/TypeScript, etc.), and falls back to a simple text scan otherwise.
     ]]></description>
 
     <!-- Product and plugin compatibility requirements.
