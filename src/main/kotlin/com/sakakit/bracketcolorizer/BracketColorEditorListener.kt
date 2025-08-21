@@ -38,13 +38,13 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
         ApplicationManager.getApplication().messageBus.connect()
             .subscribe(FileDocumentManagerListener.TOPIC, object : FileDocumentManagerListener {
                 override fun fileContentReloaded(file: VirtualFile, document: Document) {
-                    ApplicationManager.getApplication().invokeLater({
+                    ApplicationManager.getApplication().invokeLater {
                         // 開いている全エディタに対して再ハイライト
                         EditorFactory.getInstance().getEditors(document).forEach { editor ->
                             val project = editor.project ?: return@forEach
                             updateHighlights(project, document)
                         }
-                    })
+                    }
                 }
             })
     }

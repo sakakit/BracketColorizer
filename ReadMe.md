@@ -156,7 +156,7 @@ For IntelliJ IDEA, use the IDE's corresponding plugins folder similarly.
 ### Uninstall/Update
 - Disable/uninstall from Settings/Preferences > Plugins
 - If manually placed, remove the ZIP/folder from the plugins directory
-- Restart the IDE afterwards
+- Restart the IDE afterward
 
 ## Troubleshooting
 
@@ -164,7 +164,7 @@ For IntelliJ IDEA, use the IDE's corresponding plugins folder similarly.
   - Searchable options index builder failed / IllegalArgumentException: Locale must be default
 - Workaround: Temporarily skip the task
 ```shell script
-.\u200bgradlew.bat buildPlugin -x buildSearchableOptions --no-configuration-cache
+.\gradlew.bat buildPlugin -x buildSearchableOptions --no-configuration-cache
 ```
 
 Other tips:
