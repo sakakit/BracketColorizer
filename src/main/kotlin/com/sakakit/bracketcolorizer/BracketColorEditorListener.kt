@@ -3,7 +3,6 @@
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.EditorFactory
-import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.editor.event.EditorFactoryEvent
@@ -11,7 +10,6 @@ import com.intellij.openapi.editor.event.EditorFactoryListener
 import com.intellij.openapi.editor.markup.HighlighterLayer
 import com.intellij.openapi.editor.markup.HighlighterTargetArea
 import com.intellij.openapi.editor.markup.RangeHighlighter
-import com.intellij.openapi.editor.markup.TextAttributes
 import com.intellij.openapi.fileTypes.SyntaxHighlighter
 import com.intellij.openapi.fileTypes.SyntaxHighlighterFactory
 import com.intellij.openapi.project.DumbAware
@@ -77,17 +75,15 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
      */
     private fun updateHighlights(project: Project, document: Document) {
         clearHighlights(document)
-        val psiFile = PsiDocumentManager.getInstance(project).getPsiFile(document) ?: return
-        val text = document.text
-        val highlighter = SyntaxHighlighterFactory.getSyntaxHighlighter(psiFile.language, project, psiFile.virtualFile)
-        val lexer = highlighter?.highlightingLexer
         val editor = EditorFactory.getInstance().getEditors(document, project).firstOrNull() ?: return
         val markup = editor.markupModel
+        val text = document.text
 
+        // 新しいハイライトを先に構築し、最後に一括で差し替える
         val newList = mutableListOf<RangeHighlighter>()
+
         fun addRange(startOffset: Int, endOffset: Int, levelIdx: Int) {
             val key = BracketKeys.LEVEL_KEYS[levelIdx]
-            // Use TextAttributesKey so that changes in the color scheme are reflected immediately
             val rh = markup.addRangeHighlighter(
                 key,
                 startOffset,
@@ -98,9 +94,12 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
             newList.add(rh)
         }
 
-        if (lexer == null) {
-            simpleScan(text) { offset, levelIdx -> addRange(offset, offset + 1, levelIdx) }
-        } else {
+        // PSI/レクサ取得は ReadAction 内で行い、未準備時は simpleScan にフォールバック
+        val parsedOk = ApplicationManager.getApplication().runReadAction<Boolean> {
+            val psiFile = PsiDocumentManager.getInstance(project).getPsiFile(document) ?: return@runReadAction false
+            val highlighter = SyntaxHighlighterFactory.getSyntaxHighlighter(psiFile.language, project, psiFile.virtualFile)
+            val lexer = highlighter?.highlightingLexer ?: return@runReadAction false
+
             val openToClose = mapOf('(' to ')', '{' to '}', '[' to ']', '<' to '>')
             val closeToOpen = openToClose.entries.associate { it.value to it.key }
             val stack = ArrayDeque<Char>()
@@ -117,8 +116,7 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
             }
 
             fun isProbableGenericOpen(textIdx: Int): Boolean {
-                if (isOperatorAngle(textIdx, '<')) return false
-                // Check neighbors ignoring spaces
+                // 直前直後の非空白を参照して < を型引数開始とみなすか判定
                 fun prevNonSpace(i: Int): Char? { var j=i-1; while (j>=0 && text[j].isWhitespace()) j--; return if (j>=0) text[j] else null }
                 fun nextNonSpace(i: Int): Char? { var j=i+1; while (j<text.length && text[j].isWhitespace()) j++; return if (j<text.length) text[j] else null }
                 val p = prevNonSpace(textIdx)
@@ -128,20 +126,16 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                 return isNextTypeish && (isPrevTypeish || p == null)
             }
 
-            fun shouldTreatAsOpen(ch: Char, absIdx: Int): Boolean {
-                return when (ch) {
-                    '<' -> isProbableGenericOpen(absIdx)
-                    '(', '{', '[' -> true
-                    else -> false
-                }
+            fun shouldTreatAsOpen(ch: Char, absIdx: Int): Boolean = when (ch) {
+                '<' -> isProbableGenericOpen(absIdx)
+                '(', '{', '[' -> true
+                else -> false
             }
 
-            fun shouldTreatAsClose(ch: Char, absIdx: Int): Boolean {
-                return when (ch) {
-                    '>' -> !isOperatorAngle(absIdx, '>') && stack.isNotEmpty() && stack.last() == '<'
-                    ')', '}', ']' -> stack.isNotEmpty() && openToClose[stack.last()] == ch
-                    else -> false
-                }
+            fun shouldTreatAsClose(ch: Char, absIdx: Int): Boolean = when (ch) {
+                '>' -> !isOperatorAngle(absIdx, '>') && stack.isNotEmpty() && stack.last() == '<'
+                ')', '}', ']' -> stack.isNotEmpty() && openToClose[stack.last()] == ch
+                else -> false
             }
 
             lexer.start(text)
@@ -159,18 +153,59 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                             stack.addLast(ch)
                             colorIndexStack.addLast(levelIdx)
                             addRange(abs, abs + 1, levelIdx)
-                        } else if (ch in closeToOpen.keys && shouldTreatAsClose(ch, abs)) {
-                            val levelIdx = colorIndexStack.removeLast()
-                            stack.removeLast()
-                            addRange(abs, abs + 1, levelIdx)
+                        } else if (ch in closeToOpen.keys) {
+                            // 閉じ括弧は不一致でもできる限り色を付ける（スタック修復を試みる）
+                            if (ch == '>' && !shouldTreatAsClose(ch, abs)) {
+                                // '>' が演算子と判断されたらスキップ
+                                // ただし generic 由来でない '>' はここに来ない想定
+                            } else {
+                                val desiredOpen = closeToOpen[ch]
+                                var levelIdxForClose: Int? = null
+                                // スタックから desiredOpen を探しつつポップ
+                                if (stack.isNotEmpty()) {
+                                    if (stack.last() == desiredOpen) {
+                                        levelIdxForClose = colorIndexStack.removeLast()
+                                        stack.removeLast()
+                                    } else {
+                                        // 不一致：上から遡って一致を探す（壊れたスタックの修復）
+                                        var found = false
+                                        while (stack.isNotEmpty()) {
+                                            val poppedOpen = stack.removeLast()
+                                            val poppedLevel = colorIndexStack.removeLast()
+                                            if (poppedOpen == desiredOpen) {
+                                                levelIdxForClose = poppedLevel
+                                                found = true
+                                                break
+                                            }
+                                        }
+                                        if (!found) {
+                                            // 一致が見つからない場合でも最低限の色を付ける
+                                            levelIdxForClose = 0
+                                        }
+                                    }
+                                } else {
+                                    // スタックが空：単独の閉じ括弧にも色を付ける
+                                    levelIdxForClose = 0
+                                }
+                                addRange(abs, abs + 1, levelIdxForClose!!)
+                            }
                         } else {
-                            // skip non-bracket or unmatched closing; do nothing
+                            // skip non-bracket; do nothing
                         }
                     }
                 }
                 lexer.advance()
             }
+            true
         }
+
+        if (!parsedOk) {
+            // フォールバック（PSI/レクサ未準備や Dumb モードなど）
+            simpleScan(text) { offset, levelIdx -> addRange(offset, offset + 1, levelIdx) }
+        }
+
+        // ここで旧ハイライトを破棄してから新リストを登録（消えっぱなしを防止）
+        clearHighlights(document)
         highlightersMap[document] = newList
     }
 
@@ -227,10 +262,24 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                     onBracket(i, levelIdx)
                 }
             } else if (ch == '>') {
-                if (!isOperatorAngle(i, '>') && stack.isNotEmpty() && stack.last() == '<') {
-                    val levelIdx = colorIndexStack.removeLast()
-                    stack.removeLast()
-                    onBracket(i, levelIdx)
+                if (!isOperatorAngle(i, '>')) {
+                    // 角括弧の閉じ側も不一致修復して色付け
+                    if (stack.isNotEmpty()) {
+                        var levelIdxForClose: Int? = null
+                        var found = false
+                        while (stack.isNotEmpty()) {
+                            val poppedOpen = stack.removeLast()
+                            val poppedLevel = colorIndexStack.removeLast()
+                            if (poppedOpen == '<') {
+                                levelIdxForClose = poppedLevel
+                                found = true
+                                break
+                            }
+                        }
+                        onBracket(i, levelIdxForClose ?: 0)
+                    } else {
+                        onBracket(i, 0)
+                    }
                 }
             } else if (ch == '(' || ch == '{' || ch == '[') {
                 val levelIdx = stack.size % BracketColorSettings.LEVEL_COUNT
@@ -238,10 +287,36 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                 colorIndexStack.addLast(levelIdx)
                 onBracket(i, levelIdx)
             } else if (ch == ')' || ch == '}' || ch == ']') {
-                if (stack.isNotEmpty() && openToClose[stack.last()] == ch) {
-                    val levelIdx = colorIndexStack.removeLast()
-                    stack.removeLast()
-                    onBracket(i, levelIdx)
+                // 丸/波/角括弧の閉じ側も不一致修復して必ず色付け
+                val desiredOpen = when (ch) {
+                    ')' -> '('
+                    '}' -> '{'
+                    ']' -> '['
+                    else -> null
+                }
+                if (desiredOpen != null) {
+                    var levelIdxForClose: Int? = null
+                    if (stack.isNotEmpty()) {
+                        if (stack.last() == desiredOpen) {
+                            levelIdxForClose = colorIndexStack.removeLast()
+                            stack.removeLast()
+                        } else {
+                            var found = false
+                            while (stack.isNotEmpty()) {
+                                val poppedOpen = stack.removeLast()
+                                val poppedLevel = colorIndexStack.removeLast()
+                                if (poppedOpen == desiredOpen) {
+                                    levelIdxForClose = poppedLevel
+                                    found = true
+                                    break
+                                }
+                            }
+                            if (!found) levelIdxForClose = 0
+                        }
+                    } else {
+                        levelIdxForClose = 0
+                    }
+                    onBracket(i, levelIdxForClose!!)
                 }
             }
         }
