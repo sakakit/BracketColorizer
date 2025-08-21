@@ -1,24 +1,39 @@
-﻿package com.sakakit.brackets
+﻿package com.sakakit.bracketcolorizer
 
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.editor.event.EditorFactoryEvent
 import com.intellij.openapi.editor.event.EditorFactoryListener
 import com.intellij.openapi.editor.markup.HighlighterLayer
+import com.intellij.openapi.editor.markup.HighlighterTargetArea
 import com.intellij.openapi.editor.markup.RangeHighlighter
+import com.intellij.openapi.editor.markup.TextAttributes
+import com.intellij.openapi.fileTypes.SyntaxHighlighter
 import com.intellij.openapi.fileTypes.SyntaxHighlighterFactory
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.Key
 import com.intellij.psi.PsiDocumentManager
+import com.intellij.psi.tree.IElementType
 import java.util.concurrent.ConcurrentHashMap
 
+/**
+ * エディタの生成/破棄およびドキュメント変更をフックし、
+ * ブラケットへのレンジハイライトを更新するリスナー。
+ *
+ * Annotator を使わない手動ハイライト版。SyntaxHighlighter を用いて
+ * コメント/文字列/ドキュメントを除外し、ネストレベルに応じた色を適用します。
+ */
 class BracketColorEditorListener : EditorFactoryListener, DumbAware {
-    private val highlightersMap = ConcurrentHashMap<com.intellij.openapi.editor.Document, MutableList<RangeHighlighter>>()
-    private val listenersMap = ConcurrentHashMap<com.intellij.openapi.editor.Document, MutableList<DocumentListener>>()
+    private val highlightersMap = ConcurrentHashMap<Document, MutableList<RangeHighlighter>>()
+    private val listenersMap = ConcurrentHashMap<Document, MutableList<DocumentListener>>()
 
+    /**
+     * エディタが生成されたとき、ドキュメント変更リスナーを取り付けて初期ハイライトを行います。
+     */
     override fun editorCreated(event: EditorFactoryEvent) {
         val editor = event.editor
         val project = editor.project ?: return
@@ -37,17 +52,30 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
         updateHighlights(project, document)
     }
 
+    /**
+     * エディタが閉じられたとき、ハイライトとリスナーをクリーンアップします。
+     */
     override fun editorReleased(event: EditorFactoryEvent) {
         val document = event.editor.document
         clearHighlights(document)
         listenersMap.remove(document)?.forEach { document.removeDocumentListener(it) }
     }
 
-    private fun clearHighlights(document: com.intellij.openapi.editor.Document) {
+    /**
+     * 指定ドキュメントに対して現在適用されているレンジハイライトをすべて除去します。
+     * @param document 対象ドキュメント
+     */
+    private fun clearHighlights(document: Document) {
         highlightersMap.remove(document)?.forEach { it.dispose() }
     }
 
-    private fun updateHighlights(project: Project, document: com.intellij.openapi.editor.Document) {
+    /**
+     * ドキュメント全体を再解析してブラケットのレンジハイライトを張り直します。
+     * SyntaxHighlighter/Lexer が利用可能な場合はそれを用い、なければテキストを単純走査します。
+     * @param project 対象プロジェクト
+     * @param document 対象ドキュメント
+     */
+    private fun updateHighlights(project: Project, document: Document) {
         clearHighlights(document)
         val psiFile = PsiDocumentManager.getInstance(project).getPsiFile(document) ?: return
         val text = document.text
@@ -59,19 +87,19 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
         val newList = mutableListOf<RangeHighlighter>()
         fun addRange(startOffset: Int, endOffset: Int, levelIdx: Int) {
             val key = BracketKeys.LEVEL_KEYS[levelIdx]
-            val scheme = com.intellij.openapi.editor.colors.EditorColorsManager.getInstance().globalScheme
+            val scheme = EditorColorsManager.getInstance().globalScheme
             var attrs = scheme.getAttributes(key)
             if (attrs == null || attrs.foregroundColor == null) {
                 // Fallback to settings-derived color to ensure visibility even if scheme hasn't applied yet
                 val color = BracketColorSettings.getInstance().getColors()[levelIdx]
-                attrs = com.intellij.openapi.editor.markup.TextAttributes(color, null, null, null, 0)
+                attrs = TextAttributes(color, null, null, null, 0)
             }
             val rh = markup.addRangeHighlighter(
                 startOffset,
                 endOffset,
                 HighlighterLayer.ADDITIONAL_SYNTAX,
                 attrs,
-                com.intellij.openapi.editor.markup.HighlighterTargetArea.EXACT_RANGE
+                HighlighterTargetArea.EXACT_RANGE
             )
             newList.add(rh)
         }
@@ -152,7 +180,13 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
         highlightersMap[document] = newList
     }
 
-    private fun isCommentOrStringToken(highlighter: com.intellij.openapi.fileTypes.SyntaxHighlighter, tokenType: com.intellij.psi.tree.IElementType): Boolean {
+    /**
+     * トークンがコメント/文字列/ドキュメントかどうかを判定します。
+     * @param highlighter 対象言語の SyntaxHighlighter
+     * @param tokenType 判定するトークンタイプ
+     * @return コメント・文字列・ドキュメントなら true
+     */
+    private fun isCommentOrStringToken(highlighter: SyntaxHighlighter, tokenType: IElementType): Boolean {
         val keys = highlighter.getTokenHighlights(tokenType)
         return keys.any { key ->
             val name = key.externalName
@@ -160,6 +194,12 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
         }
     }
 
+    /**
+     * 簡易スキャナでテキスト全体を走査し、ブラケット検出時にコールバックします（Lexer 不使用）。
+     * - 角括弧は演算子との簡易判定を行います。
+     * @param text 対象テキスト
+     * @param onBracket ブラケット検出時に呼ばれるコールバック（オフセットとレベル）
+     */
     private fun simpleScan(text: String, onBracket: (offset: Int, levelIdx: Int) -> Unit) {
         val openToClose = mapOf('(' to ')', '{' to '}', '[' to ']', '<' to '>')
         val stack = ArrayDeque<Char>()

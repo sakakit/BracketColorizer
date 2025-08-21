@@ -24,13 +24,13 @@
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
         <!-- Settings -->
-        <applicationService serviceImplementation="com.sakakit.brackets.BracketColorSettings"/>
-        <applicationConfigurable instance="com.sakakit.brackets.BracketColorConfigurable" id="com.sakakit.brackets.settings" displayName="Bracket Colorizer"/>
+        <applicationService serviceImplementation="com.sakakit.bracketcolorizer.BracketColorSettings"/>
+        <applicationConfigurable instance="com.sakakit.bracketcolorizer.BracketColorConfigurable" id="com.sakakit.brackets.settings" displayName="Bracket Colorizer"/>
 
         <!-- Editor listener to draw colors in real-time across languages -->
-        <editorFactoryListener implementation="com.sakakit.brackets.BracketColorEditorListener"/>
+        <editorFactoryListener implementation="com.sakakit.bracketcolorizer.BracketColorEditorListener"/>
 
         <!-- Apply colors on startup -->
-        <postStartupActivity implementation="com.sakakit.brackets.ApplyColorsStartup"/>
+        <postStartupActivity implementation="com.sakakit.bracketcolorizer.ApplyColorsStartup"/>
     </extensions>
 </idea-plugin>

@@ -1,16 +1,30 @@
-﻿package com.sakakit.brackets
+﻿package com.sakakit.bracketcolorizer
 
 import com.intellij.lang.annotation.AnnotationHolder
 import com.intellij.lang.annotation.Annotator
 import com.intellij.lang.annotation.HighlightSeverity
 import com.intellij.openapi.editor.colors.TextAttributesKey
+import com.intellij.openapi.fileTypes.SyntaxHighlighter
 import com.intellij.openapi.fileTypes.SyntaxHighlighterFactory
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
+import com.intellij.psi.tree.IElementType
 
+/**
+ * PSI を走査してブラケット文字に色付け用のアノテーションを付与する Annotator。
+ *
+ * - Lexer/SyntaxHighlighter を利用し、コメント/文字列/ドキュメントは除外します。
+ * - 対応の取れるブラケットの開閉をスタックで追跡し、ネストレベルに応じて色を選択します。
+ * - 角括弧（< >）は演算子とジェネリクスの区別を簡易的に行います。
+ */
 class BracketColorAnnotator : Annotator, DumbAware {
+    /**
+     * ファイル単位で PSI を走査し、ブラケット文字に色属性を与えるアノテーションを作成します。
+     * @param element 対象 PSI（ファイル）
+     * @param holder アノテーションの発行先
+     */
     override fun annotate(element: PsiElement, holder: AnnotationHolder) {
         if (element !is PsiFile) return
         val file = element
@@ -85,7 +99,13 @@ class BracketColorAnnotator : Annotator, DumbAware {
         }
     }
 
-    private fun isCommentOrStringToken(highlighter: com.intellij.openapi.fileTypes.SyntaxHighlighter, tokenType: com.intellij.psi.tree.IElementType): Boolean {
+    /**
+     * トークンがコメント/文字列/ドキュメントかどうかを判定します。
+     * @param highlighter 対象言語の SyntaxHighlighter
+     * @param tokenType 判定するトークンタイプ
+     * @return コメント・文字列・ドキュメントなら true
+     */
+    private fun isCommentOrStringToken(highlighter: SyntaxHighlighter, tokenType: IElementType): Boolean {
         val keys: Array<TextAttributesKey> = highlighter.getTokenHighlights(tokenType)
         return keys.any { keyName ->
             val name = keyName.externalName
@@ -93,6 +113,12 @@ class BracketColorAnnotator : Annotator, DumbAware {
         }
     }
 
+    /**
+     * 指定位置の 1 文字に TextAttributesKey を適用するアノテーションを追加します。
+     * @param holder 発行先ホルダー
+     * @param offset 対象オフセット
+     * @param key 適用する属性キー
+     */
     private fun add(holder: AnnotationHolder, offset: Int, key: TextAttributesKey) {
         holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
             .range(TextRange(offset, offset + 1))
@@ -100,6 +126,12 @@ class BracketColorAnnotator : Annotator, DumbAware {
             .create()
     }
 
+    /**
+     * 簡易スキャナでテキスト全体を走査し、ブラケット検出時にコールバックします（Lexer 不使用）。
+     * - 角括弧は演算子との簡易判定を行います。
+     * @param text 対象テキスト
+     * @param onBracket ブラケット検出時に呼ばれるコールバック（オフセットとレベル）
+     */
     private fun simpleScan(text: String, onBracket: (offset: Int, levelIdx: Int) -> Unit) {
         val openToClose = mapOf('(' to ')', '{' to '}', '[' to ']', '<' to '>')
         val stack = ArrayDeque<Char>()

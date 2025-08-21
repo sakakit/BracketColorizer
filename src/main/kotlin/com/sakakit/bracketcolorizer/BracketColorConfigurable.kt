@@ -1,5 +1,6 @@
-﻿package com.sakakit.brackets
+﻿package com.sakakit.bracketcolorizer
 
+import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.SearchableConfigurable
 import com.intellij.openapi.project.DumbAware
@@ -9,6 +10,12 @@ import com.intellij.ui.dsl.builder.panel
 import java.awt.Color
 import javax.swing.JComponent
 
+/**
+ * 設定画面（Settings/Preferences）にブラケットカラーの調整 UI を提供する Configurable。
+ *
+ * - 各ネストレベルごとに ColorPanel を配置します。
+ * - 適用時にカラースキームへ反映し、ハイライトのデーモンを再起動します。
+ */
 class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, DumbAware {
     private val settings = BracketColorSettings.getInstance()
 
@@ -18,6 +25,9 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
     override fun getId(): String = "com.sakakit.brackets.settings"
     override fun getDisplayName(): String = "Bracket Colorizer"
 
+    /**
+     * 設定 UI のルートコンポーネントを生成します。
+     */
     override fun createComponent(): JComponent {
         if (root == null) {
             root = panel {
@@ -32,6 +42,9 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
         return root as DialogPanel
     }
 
+    /**
+     * 画面上の選択色と保存済み設定が異なるかを判定します。
+     */
     override fun isModified(): Boolean {
         val colors = settings.getColors()
         for (i in 0 until BracketColorSettings.LEVEL_COUNT) {
@@ -41,15 +54,21 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
         return false
     }
 
+    /**
+     * 選択された色を保存し、カラースキームに適用して、ハイライトを再起動します。
+     */
     override fun apply() {
         for (i in 0 until BracketColorSettings.LEVEL_COUNT) {
             settings.setColor(i, panels[i].selectedColor ?: Color.BLACK)
         }
         settings.applyColorsToScheme()
         // restart daemon highlighting
-        com.intellij.codeInsight.daemon.DaemonCodeAnalyzer.getInstance(null).restart()
+        DaemonCodeAnalyzer.getInstance(null).restart()
     }
 
+    /**
+     * 設定画面の色選択を保存済みの値に戻します。
+     */
     override fun reset() {
         val colors = settings.getColors()
         for (i in 0 until BracketColorSettings.LEVEL_COUNT) {
