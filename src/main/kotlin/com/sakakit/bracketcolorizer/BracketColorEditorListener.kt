@@ -84,11 +84,12 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
 
         fun addRange(startOffset: Int, endOffset: Int, levelIdx: Int) {
             val key = BracketKeys.LEVEL_KEYS[levelIdx]
+            // 既存の弱警告などより上のレイヤで描画して灰色上書きを回避
             val rh = markup.addRangeHighlighter(
                 key,
                 startOffset,
                 endOffset,
-                HighlighterLayer.ADDITIONAL_SYNTAX,
+                HighlighterLayer.SELECTION - 1,  // 以前: HighlighterLayer.ADDITIONAL_SYNTAX
                 HighlighterTargetArea.EXACT_RANGE
             )
             newList.add(rh)
@@ -230,7 +231,6 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
      * @param onBracket ブラケット検出時に呼ばれるコールバック（オフセットとレベル）
      */
     private fun simpleScan(text: String, onBracket: (offset: Int, levelIdx: Int) -> Unit) {
-        val openToClose = mapOf('(' to ')', '{' to '}', '[' to ']', '<' to '>')
         val stack = ArrayDeque<Char>()
         val colorIndexStack = ArrayDeque<Int>()
         fun isOperatorAngle(idx: Int, ch: Char): Boolean {
@@ -266,13 +266,11 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                     // 角括弧の閉じ側も不一致修復して色付け
                     if (stack.isNotEmpty()) {
                         var levelIdxForClose: Int? = null
-                        var found = false
                         while (stack.isNotEmpty()) {
                             val poppedOpen = stack.removeLast()
                             val poppedLevel = colorIndexStack.removeLast()
                             if (poppedOpen == '<') {
                                 levelIdxForClose = poppedLevel
-                                found = true
                                 break
                             }
                         }
