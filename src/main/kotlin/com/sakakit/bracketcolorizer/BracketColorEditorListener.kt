@@ -87,18 +87,12 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
         val newList = mutableListOf<RangeHighlighter>()
         fun addRange(startOffset: Int, endOffset: Int, levelIdx: Int) {
             val key = BracketKeys.LEVEL_KEYS[levelIdx]
-            val scheme = EditorColorsManager.getInstance().globalScheme
-            var attrs = scheme.getAttributes(key)
-            if (attrs == null || attrs.foregroundColor == null) {
-                // Fallback to settings-derived color to ensure visibility even if scheme hasn't applied yet
-                val color = BracketColorSettings.getInstance().getColors()[levelIdx]
-                attrs = TextAttributes(color, null, null, null, 0)
-            }
+            // Use TextAttributesKey so that changes in the color scheme are reflected immediately
             val rh = markup.addRangeHighlighter(
+                key,
                 startOffset,
                 endOffset,
                 HighlighterLayer.ADDITIONAL_SYNTAX,
-                attrs,
                 HighlighterTargetArea.EXACT_RANGE
             )
             newList.add(rh)
