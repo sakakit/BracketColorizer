@@ -37,10 +37,13 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
      */
     private var root: DialogPanel? = null
 
-    // 括弧タイプごとの有効/無効チェックボックス
+    /** 括弧タイプごとの有効/無効チェックボックス（丸括弧）。*/
     private val cbRound = JBCheckBox("()")
+    /** 括弧タイプごとの有効/無効チェックボックス（角括弧）。*/
     private val cbSquare = JBCheckBox("[]")
+    /** 括弧タイプごとの有効/無効チェックボックス（波括弧）。*/
     private val cbCurly = JBCheckBox("{}")
+    /** 括弧タイプごとの有効/無効チェックボックス（山括弧）。*/
     private val cbAngle = JBCheckBox("<>")
 
     /**

@@ -226,7 +226,15 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
             }
 
             fun shouldTreatAsClose(ch: Char, absIdx: Int): Boolean = when (ch) {
-                '>' -> !isOperatorAngle(absIdx, '>') && stack.isNotEmpty() && stack.last() == '<'
+                '>' -> {
+                    // スタックに '<' が積まれている（ジェネリクスの入れ子を処理中）の場合は
+                    // 連続する '>>' であっても演算子扱いせずに閉じ括弧として扱う
+                    if (stack.isNotEmpty() && stack.last() == '<') {
+                        true
+                    } else {
+                        !isOperatorAngle(absIdx, '>') && stack.isNotEmpty() && stack.last() == '<'
+                    }
+                }
                 ')', '}', ']' -> stack.isNotEmpty() && openToClose[stack.last()] == ch
                 else -> false
             }
@@ -357,22 +365,21 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                     onBracket(i, levelIdx)
                 }
             } else if (ch == '>') {
-                if (!isOperatorAngle(i, '>')) {
-                    // 角括弧の閉じ側も不一致修復して色付け
-                    if (stack.isNotEmpty()) {
-                        var levelIdxForClose: Int? = null
-                        while (stack.isNotEmpty()) {
-                            val poppedOpen = stack.removeLast()
-                            val poppedLevel = colorIndexStack.removeLast()
-                            if (poppedOpen == '<') {
-                                levelIdxForClose = poppedLevel
-                                break
-                            }
+                // スタック上に '<' があれば、'>>' の2つ目であってもジェネリクスの閉じとして扱う
+                if (stack.isNotEmpty() && stack.last() == '<') {
+                    var levelIdxForClose: Int? = null
+                    while (stack.isNotEmpty()) {
+                        val poppedOpen = stack.removeLast()
+                        val poppedLevel = colorIndexStack.removeLast()
+                        if (poppedOpen == '<') {
+                            levelIdxForClose = poppedLevel
+                            break
                         }
-                        onBracket(i, levelIdxForClose ?: 0)
-                    } else {
-                        onBracket(i, 0)
                     }
+                    onBracket(i, levelIdxForClose ?: 0)
+                } else if (!isOperatorAngle(i, '>')) {
+                    // '<' が積まれていない場合のみ、演算子判定に従って閉じ扱い
+                    onBracket(i, 0)
                 }
             } else if (ch == '(' || ch == '{' || ch == '[') {
                 val levelIdx = stack.size % BracketColorSettings.LEVEL_COUNT
