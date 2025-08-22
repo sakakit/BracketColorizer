@@ -192,12 +192,13 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
             val psiFile = PsiDocumentManager.getInstance(project).getPsiFile(document) ?: return@runReadAction false
             val highlighter = SyntaxHighlighterFactory.getSyntaxHighlighter(psiFile.language, project, psiFile.virtualFile)
             val lexer = highlighter?.highlightingLexer ?: return@runReadAction false
-
+// ... existing code ...
             val openToClose = mapOf('(' to ')', '{' to '}', '[' to ']', '<' to '>')
             val closeToOpen = openToClose.entries.associate { it.value to it.key }
             val stack = ArrayDeque<Char>()
             val colorIndexStack = ArrayDeque<Int>()
 
+            // ここから不足していたヘルパー関数を追加
             fun isOperatorAngle(textIdx: Int, ch: Char): Boolean {
                 val prev = if (textIdx > 0) text[textIdx - 1] else '\u0000'
                 val next = if (textIdx + 1 < text.length) text[textIdx + 1] else '\u0000'
@@ -227,8 +228,7 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
 
             fun shouldTreatAsClose(ch: Char, absIdx: Int): Boolean = when (ch) {
                 '>' -> {
-                    // スタックに '<' が積まれている（ジェネリクスの入れ子を処理中）の場合は
-                    // 連続する '>>' であっても演算子扱いせずに閉じ括弧として扱う
+                    // スタックに '<' がある場合は、演算子 '>>' の2つ目でも閉じ扱い
                     if (stack.isNotEmpty() && stack.last() == '<') {
                         true
                     } else {
@@ -238,14 +238,27 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                 ')', '}', ']' -> stack.isNotEmpty() && openToClose[stack.last()] == ch
                 else -> false
             }
-
+            // ここまで追記
             lexer.start(text)
+            // C/C++/C# の #if 0 / #if false 無効領域を検出（Lexer 経路）
+            val inactiveRanges = computeInactivePreprocessorRanges(text, psiFile.language.id)
+            var inactiveIdx = 0
+            fun tokenIsInactive(start: Int, end: Int): Boolean {
+                while (inactiveIdx < inactiveRanges.size && inactiveRanges[inactiveIdx].last < start) {
+                    inactiveIdx++
+                }
+                if (inactiveIdx >= inactiveRanges.size) return false
+                val r = inactiveRanges[inactiveIdx]
+                // [start, end) と [r.first, r.last+1) の交差で判定
+                return start < (r.last + 1) && end > r.first
+            }
             while (lexer.tokenType != null) {
                 val start = lexer.tokenStart
                 val end = lexer.tokenEnd
                 val tokenText = text.substring(start, end)
                 val isCommentOrString = isCommentOrStringToken(highlighter, lexer.tokenType!!)
-                if (!isCommentOrString) {
+                val isInactive = tokenIsInactive(start, end)
+                if (!isCommentOrString && !isInactive) {
                     for (i in tokenText.indices) {
                         val ch = tokenText[i]
                         val abs = start + i
@@ -255,20 +268,16 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                             colorIndexStack.addLast(levelIdx)
                             if (enabledFor(ch)) addRange(abs, abs + 1, levelIdx)
                         } else if (ch in closeToOpen.keys) {
-                            // 閉じ括弧は不一致でもできる限り色を付ける（スタック修復を試みる）
                             if (ch == '>' && !shouldTreatAsClose(ch, abs)) {
-                                // '>' が演算子と判断されたらスキップ
-                                // ただし generic 由来でない '>' はここに来ない想定
+                                // skip
                             } else {
                                 val desiredOpen = closeToOpen[ch]
                                 var levelIdxForClose: Int? = null
-                                // スタックから desiredOpen を探しつつポップ
                                 if (stack.isNotEmpty()) {
                                     if (stack.last() == desiredOpen) {
                                         levelIdxForClose = colorIndexStack.removeLast()
                                         stack.removeLast()
                                     } else {
-                                        // 不一致：上から遡って一致を探す（壊れたスタックの修復）
                                         var found = false
                                         while (stack.isNotEmpty()) {
                                             val poppedOpen = stack.removeLast()
@@ -279,19 +288,13 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                                                 break
                                             }
                                         }
-                                        if (!found) {
-                                            // 一致が見つからない場合でも最低限の色を付ける
-                                            levelIdxForClose = 0
-                                        }
+                                        if (!found) levelIdxForClose = 0
                                     }
                                 } else {
-                                    // スタックが空：単独の閉じ括弧にも色を付ける
                                     levelIdxForClose = 0
                                 }
                                 if (enabledFor(ch)) addRange(abs, abs + 1, levelIdxForClose!!)
                             }
-                        } else {
-                            // skip non-bracket; do nothing
                         }
                     }
                 }
@@ -302,9 +305,20 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
 
         if (!parsedOk) {
             // フォールバック（PSI/レクサ未準備や Dumb モードなど）
+            // C/C++/C# の無効プリプロセッサ領域を検出し、オフセットを除外
+            val inactiveRanges = computeInactivePreprocessorRanges(text, null)
+            var rIdx = 0
+            fun isInactiveOffset(off: Int): Boolean {
+                while (rIdx < inactiveRanges.size && inactiveRanges[rIdx].last < off) rIdx++
+                if (rIdx >= inactiveRanges.size) return false
+                val r = inactiveRanges[rIdx]
+                return off >= r.first && off <= r.last
+            }
             simpleScan(text) { offset, levelIdx ->
-                val ch = text[offset]
-                if (enabledFor(ch)) addRange(offset, offset + 1, levelIdx)
+                if (!isInactiveOffset(offset)) {
+                    val ch = text[offset]
+                    if (enabledFor(ch)) addRange(offset, offset + 1, levelIdx)
+                }
             }
         }
 
@@ -420,5 +434,150 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                 }
             }
         }
+    }
+
+    /**
+     * C/C++/C# 向けの簡易プリプロセッサ解析。
+     * - #if 0 / #if false（および #elif 0 / #elif false）で明確に無効となる領域のみを抽出します。
+     * - #else / #endif による切り替え・終了に対応。ネストも対応。
+     * - 未知の条件式は評価せず（未知）として扱い、除外しません（安全側）。
+     * - languageId が C/C++/C# 以外の場合は空を返します。
+     *
+     * 返値は [start, end]（両端含む）オフセットの昇順リスト。
+     */
+    private fun computeInactivePreprocessorRanges(text: String, languageId: String?): List<IntRange> {
+        fun isCLike(langId: String?): Boolean {
+            if (langId == null) return true // フォールバック時はヒューリスティックに許可
+            val id = langId.lowercase()
+            return id.contains("c#") || id.contains("csharp") || id == "c" || id.contains("cpp") || id.contains("c++") || id.contains("objective")
+        }
+        if (!isCLike(languageId)) return emptyList()
+
+        val ranges = ArrayList<IntRange>()
+        var inactiveDepth = 0
+        var inactiveStart = -1
+        var idx = 0
+        val len = text.length
+
+        fun skipSpacesFrom(i: Int): Int {
+            var j = i
+            while (j < len && (text[j] == ' ' || text[j] == '\t')) j++
+            return j
+        }
+        fun lineEndFrom(i: Int): Int {
+            var j = i
+            while (j < len && text[j] != '\n' && text[j] != '\r') j++
+            return j
+        }
+        fun nextLineStartFrom(i: Int): Int {
+            var j = i
+            while (j < len && text[j] != '\n' && text[j] != '\r') j++
+            if (j < len && text[j] == '\r' && j + 1 < len && text[j + 1] == '\n') j++
+            if (j < len) j++
+            return j
+        }
+        fun parseDirectiveAt(lineStart: Int): Pair<String, String>? {
+            var j = skipSpacesFrom(lineStart)
+            if (j >= len || text[j] != '#') return null
+            j++
+            j = skipSpacesFrom(j)
+            val kwStart = j
+            while (j < len && text[j].isLetter()) j++
+            if (j == kwStart) return null
+            val keyword = text.substring(kwStart, j).lowercase()
+            val restStart = skipSpacesFrom(j)
+            val lineEnd = lineEndFrom(restStart)
+            val arg = text.substring(restStart, lineEnd).trim()
+            return keyword to arg
+        }
+        fun evalFalse(arg: String): Boolean {
+            val a = arg.lowercase()
+            return a == "0" || a == "false"
+        }
+        fun evalTrue(arg: String): Boolean {
+            val a = arg.lowercase()
+            return a == "1" || a == "true"
+        }
+
+        while (idx < len) {
+            val lineStart = idx
+            val directive = parseDirectiveAt(lineStart)
+            if (directive == null) {
+                idx = nextLineStartFrom(idx)
+                continue
+            }
+            val (kw, arg) = directive
+            val afterLine = nextLineStartFrom(lineStart)
+            when (kw) {
+                "if" -> {
+                    val condFalse = evalFalse(arg)
+                    if (inactiveDepth > 0) {
+                        // すでに無効領域内：ネスト深さのみ増やす
+                        inactiveDepth++
+                    } else if (condFalse) {
+                        inactiveDepth = 1
+                        // 無効領域はディレクティブ行の後から開始
+                        inactiveStart = afterLine
+                    }
+                    // cond が true/未知 の場合は何もしない（安全側）
+                }
+                "elif" -> {
+                    if (inactiveDepth == 1) {
+                        // トップレベルの無効ブロック中でのみ切替を行う
+                        val condTrue = evalTrue(arg)
+                        if (condTrue) {
+                            // ここで有効化：直前までを無効として確定
+                            val end = lineStart - 1
+                            if (inactiveStart >= 0 && end >= inactiveStart) {
+                                ranges.add(inactiveStart..end)
+                            }
+                            inactiveDepth = 0
+                            inactiveStart = -1
+                        } else {
+                            // 引き続き無効（未知も無効のまま維持）
+                        }
+                    } else if (inactiveDepth > 1) {
+                        // ネスト内の elif は無視（外側が無効のため引き続き無効）
+                    } else {
+                        // 有効領域での elif は安全側で無視（ここで無効化はしない）
+                    }
+                }
+                "else" -> {
+                    if (inactiveDepth == 1) {
+                        // それまでの分岐がすべて false だったため、else で有効化
+                        val end = lineStart - 1
+                        if (inactiveStart >= 0 && end >= inactiveStart) {
+                            ranges.add(inactiveStart..end)
+                        }
+                        inactiveDepth = 0
+                        inactiveStart = -1
+                    } else if (inactiveDepth > 1) {
+                        // ネスト内：引き続き無効
+                    } else {
+                        // 有効側の else は（#if true の else 無効など）安全側で無視
+                    }
+                }
+                "endif" -> {
+                    if (inactiveDepth > 0) {
+                        inactiveDepth--
+                        if (inactiveDepth == 0) {
+                            // ブロック終端で無効領域を確定
+                            val end = lineStart - 1
+                            if (inactiveStart >= 0 && end >= inactiveStart) {
+                                ranges.add(inactiveStart..end)
+                            }
+                            inactiveStart = -1
+                        }
+                    } else {
+                        // 不一致は無視
+                    }
+                }
+                else -> {
+                    // その他ディレクティブは無視
+                }
+            }
+            idx = afterLine
+        }
+        return ranges
     }
 }
