@@ -6,9 +6,10 @@
 BracketColorizer は、JetBrains IntelliJ プラットフォーム系 IDE 向けのエディタ支援プラグインです。ソースコード内の括弧をネストの深さに応じて色分けし、対応関係を視覚的に把握しやすくします。
 - 対応括弧: (), [], {}, <>（< > は文脈に応じて簡易判定）
 - 仕組み: 言語プラグインが提供する SyntaxHighlighter を利用できる場合はコメント/文字列などを除外し、それ以外はテキスト走査で色付けします（言語非依存）。
-- カスタマイズ: 色のセットを設定から調整可能。ネストレベル数は固定（9）。
+- カスタマイズ: 色のセットを設定から調整可能。括弧タイプごと（(), [], {}, <>）の色付け有効/無効も設定できます。ネストレベル数は固定（9）。
 - 目的: ネストが深いコードでも括弧の対応を素早く追えるようにし、読みやすさと保守性を向上させます。
 - 堅牢性: IDE での保存/コミットや外部再読込（例: Git 操作）後でも、自動的に色付けを再適用して表示を維持します。
+- 反映: 設定で Apply を押すと、設定ダイアログを開いたままでも即座に色付けへ反映され、ファイルを開き直す必要はありません。
 
 ## AI生成に関する告知
 本プロジェクト（ソースコードおよびこの ReadMe を含む）は、AI 支援により作成されました。初期作成および一部の更新には、JetBrains の自律型プログラマー「Junie」を用いています。
@@ -105,9 +106,10 @@ This document provides an overview of the plugin, how to build it, and instructi
 BracketColorizer is an editor-assistance plugin for JetBrains IntelliJ Platform IDEs. It colorizes brackets in source code based on nesting depth to make matching pairs easier to visually track.
 - Supported brackets: (), [], {}, <> (angle brackets are heuristically distinguished depending on context)
 - How it works: When a language plugin provides a SyntaxHighlighter, the plugin excludes comments/strings and colors brackets accordingly; otherwise it falls back to simple text scanning (language-agnostic).
-- Customization: You can adjust the color set in settings. The number of nesting levels is fixed (9).
+- Customization: You can adjust the color set in settings. You can also enable/disable coloring per bracket type ((), [], {}, <>). The number of nesting levels is fixed (9).
 - Purpose: Help you quickly follow bracket pairs even in deeply nested code, improving readability and maintainability.
 - Robustness: Coloring is preserved across IDE saves/commits and external file reloads (e.g., Git operations) via automatic re-application.
+- Live apply: Pressing Apply in Settings updates coloring immediately even while the Settings dialog is open; reopening files is not necessary.
 
 ## Notice about AI generation
 This project (including source code and this ReadMe) was created with AI assistance. For the initial creation and some updates, we used JetBrains' autonomous programmer "Junie." Content has been reviewed and edited by a human as needed.

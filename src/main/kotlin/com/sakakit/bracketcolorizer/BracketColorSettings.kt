@@ -28,6 +28,12 @@ class BracketColorSettings : PersistentStateComponent<BracketColorSettings.State
          * 初期値は defaultHexColors() の内容で、LEVEL_COUNT に合わせたサイズに調整されます。
          */
         var colorsHex: MutableList<String> = defaultHexColors().toMutableList()
+
+        /** 括弧タイプごとの色付け有効フラグ */
+        var enableRound: Boolean = true   // ()
+        var enableSquare: Boolean = true  // []
+        var enableCurly: Boolean = true   // {}
+        var enableAngle: Boolean = true   // <>
     }
 
     /**
@@ -82,6 +88,55 @@ class BracketColorSettings : PersistentStateComponent<BracketColorSettings.State
             scheme.setAttributes(key, attrs)
         }
     }
+
+    // ===== Bracket-type enable flags API =====
+    /**
+     * 丸括弧 () の色付けが有効かどうかを返します。
+     * @return 有効な場合は true、無効な場合は false
+     */
+    fun isRoundEnabled(): Boolean = myState.enableRound
+
+    /**
+     * 角括弧 [] の色付けが有効かどうかを返します。
+     * @return 有効な場合は true、無効な場合は false
+     */
+    fun isSquareEnabled(): Boolean = myState.enableSquare
+
+    /**
+     * 波括弧 {} の色付けが有効かどうかを返します。
+     * @return 有効な場合は true、無効な場合は false
+     */
+    fun isCurlyEnabled(): Boolean = myState.enableCurly
+
+    /**
+     * 山括弧 <> の色付けが有効かどうかを返します。
+     * @return 有効な場合は true、無効な場合は false
+     */
+    fun isAngleEnabled(): Boolean = myState.enableAngle
+
+    /**
+     * 丸括弧 () の色付けを有効/無効に設定します。
+     * @param value true で有効、false で無効
+     */
+    fun setRoundEnabled(value: Boolean) { myState.enableRound = value }
+
+    /**
+     * 角括弧 [] の色付けを有効/無効に設定します。
+     * @param value true で有効、false で無効
+     */
+    fun setSquareEnabled(value: Boolean) { myState.enableSquare = value }
+
+    /**
+     * 波括弧 {} の色付けを有効/無効に設定します。
+     * @param value true で有効、false で無効
+     */
+    fun setCurlyEnabled(value: Boolean) { myState.enableCurly = value }
+
+    /**
+     * 山括弧 <> の色付けを有効/無効に設定します。
+     * @param value true で有効、false で無効
+     */
+    fun setAngleEnabled(value: Boolean) { myState.enableAngle = value }
 
     /**
      * colorsHex のサイズを LEVEL_COUNT 以上に拡張します。

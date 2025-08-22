@@ -8,13 +8,16 @@ import com.intellij.openapi.ui.DialogPanel
 import com.intellij.ui.ColorPanel
 import com.intellij.ui.JBColor
 import com.intellij.ui.dsl.builder.panel
+import com.intellij.ui.components.JBCheckBox
 import javax.swing.JComponent
 
 /**
  * 設定画面（Settings/Preferences）にブラケットカラーの調整 UI を提供する Configurable。
  *
  * - 各ネストレベルごとに ColorPanel を配置します。
+ * - 括弧タイプ（(), [], {}, <>）ごとの色付け有効/無効をチェックボックスで切り替えられます。
  * - 適用時にカラースキームへ反映し、ハイライトのデーモンを再起動します。
+ *   また、Apply 押下で設定ダイアログを開いたままでも即座にエディタへ反映されます。
  */
 class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, DumbAware {
     /**
@@ -33,6 +36,12 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
      * createComponent で初期化し、再利用します。
      */
     private var root: DialogPanel? = null
+
+    // 括弧タイプごとの有効/無効チェックボックス
+    private val cbRound = JBCheckBox("()")
+    private val cbSquare = JBCheckBox("[]")
+    private val cbCurly = JBCheckBox("{}")
+    private val cbAngle = JBCheckBox("<>")
 
     /**
      * この設定ページの一意な ID を返します。
@@ -53,6 +62,14 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
     override fun createComponent(): JComponent {
         if (root == null) {
             root = panel {
+                group("Enable coloring for bracket types") {
+                    row {
+                        cell(cbRound)
+                        cell(cbSquare)
+                        cell(cbCurly)
+                        cell(cbAngle)
+                    }
+                }
                 for (i in 0 until BracketColorSettings.LEVEL_COUNT) {
                     row("Level ${i + 1}") {
                         cell(panels[i])
@@ -74,6 +91,10 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
             val c = panels[i].selectedColor ?: JBColor.BLACK
             if (c.rgb != colors[i].rgb) return true
         }
+        if (cbRound.isSelected != settings.isRoundEnabled()) return true
+        if (cbSquare.isSelected != settings.isSquareEnabled()) return true
+        if (cbCurly.isSelected != settings.isCurlyEnabled()) return true
+        if (cbAngle.isSelected != settings.isAngleEnabled()) return true
         return false
     }
 
@@ -84,9 +105,20 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
         for (i in 0 until BracketColorSettings.LEVEL_COUNT) {
             settings.setColor(i, panels[i].selectedColor ?: JBColor.BLACK)
         }
+        // Save bracket-type flags
+        settings.setRoundEnabled(cbRound.isSelected)
+        settings.setSquareEnabled(cbSquare.isSelected)
+        settings.setCurlyEnabled(cbCurly.isSelected)
+        settings.setAngleEnabled(cbAngle.isSelected)
+
         settings.applyColorsToScheme()
-        // restart daemon highlighting
-        DaemonCodeAnalyzer.getInstance(null).restart()
+        // 既存のアノテーション系再起動（念のため）
+        // Restart for all open projects instead of null to ensure immediate refresh
+        com.intellij.openapi.project.ProjectManager.getInstance().openProjects.forEach {
+            DaemonCodeAnalyzer.getInstance(it).restart()
+        }
+        // 括弧タイプの有効/無効変更を即時反映（モーダル中でも動作）
+        BracketColorRefresher.refreshAllOpenEditors()
     }
 
     /**
@@ -97,5 +129,9 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
         for (i in 0 until BracketColorSettings.LEVEL_COUNT) {
             panels[i].selectedColor = colors[i]
         }
+        cbRound.isSelected = settings.isRoundEnabled()
+        cbSquare.isSelected = settings.isSquareEnabled()
+        cbCurly.isSelected = settings.isCurlyEnabled()
+        cbAngle.isSelected = settings.isAngleEnabled()
     }
 }

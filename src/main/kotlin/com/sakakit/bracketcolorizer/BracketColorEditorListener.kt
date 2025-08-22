@@ -21,6 +21,36 @@ import com.intellij.psi.tree.IElementType
 import java.util.concurrent.ConcurrentHashMap
 
 /**
+ * 外部からハイライト更新を要求するためのユーティリティ。
+ * 拡張実装の companion にはロガー/定数のみ許可されるため、
+ * メソッドやミュータブル状態はこちらのオブジェクトで保持します。
+ */
+object BracketColorRefresher {
+    @Volatile
+    /**
+     * 現在アクティブな BracketColorEditorListener の参照。
+     * 設定適用など外部から再ハイライトを要求する際に使用します。
+     * 複数プロジェクト/エディタ環境を考慮し、null の可能性があります。
+     */
+    var instance: BracketColorEditorListener? = null
+
+    /** 設定変更適用時などに、開いている全エディタのハイライトを更新します。 */
+    @JvmStatic
+    fun refreshAllOpenEditors() {
+        val inst = instance ?: return
+        val runnable = Runnable {
+            EditorFactory.getInstance().allEditors.forEach { editor ->
+                val project = editor.project ?: return@forEach
+                inst.updateHighlights(project, editor.document)
+            }
+        }
+        // Ensure it runs even while a modal dialog (Settings) is open
+        ApplicationManager.getApplication()
+            .invokeLater(runnable, com.intellij.openapi.application.ModalityState.any())
+    }
+}
+
+/**
  * エディタの生成/破棄およびドキュメント変更をフックし、
  * ブラケットへのレンジハイライトを更新するリスナー。
  *
@@ -29,6 +59,7 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * Annotator を使わない手動ハイライト版。SyntaxHighlighter を用いて
  * コメント/文字列/ドキュメントを除外し、ネストレベルに応じた色を適用します。
+ * 設定の括弧タイプ有効フラグ（(), [], {}, <>）を尊重して色付け対象を切り替えます。
  */
 class BracketColorEditorListener : EditorFactoryListener, DumbAware {
     /**
@@ -43,6 +74,7 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
     private val listenersMap = ConcurrentHashMap<Document, MutableList<DocumentListener>>()
 
     init {
+            BracketColorRefresher.instance = this
         // Git 操作などによる外部再読込で色付けが消える問題への対処
         ApplicationManager.getApplication().messageBus.connect()
             .subscribe(FileDocumentManagerListener.TOPIC, object : FileDocumentManagerListener {
@@ -125,11 +157,19 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
      * @param project 対象プロジェクト
      * @param document 対象ドキュメント
      */
-    private fun updateHighlights(project: Project, document: Document) {
+    internal fun updateHighlights(project: Project, document: Document) {
         clearHighlights(document)
         val editor = EditorFactory.getInstance().getEditors(document, project).firstOrNull() ?: return
         val markup = editor.markupModel
         val text = document.text
+        val settings = BracketColorSettings.getInstance()
+        fun enabledFor(ch: Char): Boolean = when (ch) {
+            '(', ')' -> settings.isRoundEnabled()
+            '{', '}' -> settings.isCurlyEnabled()
+            '[', ']' -> settings.isSquareEnabled()
+            '<', '>' -> settings.isAngleEnabled()
+            else -> true
+        }
 
         // 新しいハイライトを先に構築し、最後に一括で差し替える
         val newList = mutableListOf<RangeHighlighter>()
@@ -205,7 +245,7 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                             val levelIdx = stack.size % BracketColorSettings.LEVEL_COUNT
                             stack.addLast(ch)
                             colorIndexStack.addLast(levelIdx)
-                            addRange(abs, abs + 1, levelIdx)
+                            if (enabledFor(ch)) addRange(abs, abs + 1, levelIdx)
                         } else if (ch in closeToOpen.keys) {
                             // 閉じ括弧は不一致でもできる限り色を付ける（スタック修復を試みる）
                             if (ch == '>' && !shouldTreatAsClose(ch, abs)) {
@@ -240,7 +280,7 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                                     // スタックが空：単独の閉じ括弧にも色を付ける
                                     levelIdxForClose = 0
                                 }
-                                addRange(abs, abs + 1, levelIdxForClose!!)
+                                if (enabledFor(ch)) addRange(abs, abs + 1, levelIdxForClose!!)
                             }
                         } else {
                             // skip non-bracket; do nothing
@@ -254,7 +294,10 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
 
         if (!parsedOk) {
             // フォールバック（PSI/レクサ未準備や Dumb モードなど）
-            simpleScan(text) { offset, levelIdx -> addRange(offset, offset + 1, levelIdx) }
+            simpleScan(text) { offset, levelIdx ->
+                val ch = text[offset]
+                if (enabledFor(ch)) addRange(offset, offset + 1, levelIdx)
+            }
         }
 
         // ここで旧ハイライトを破棄してから新リストを登録（消えっぱなしを防止）
