@@ -17,12 +17,33 @@ import javax.swing.JComponent
  * - 適用時にカラースキームへ反映し、ハイライトのデーモンを再起動します。
  */
 class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, DumbAware {
+    /**
+     * 永続化されたブラケット色設定へのアクセスを提供するサービス。
+     */
     private val settings = BracketColorSettings.getInstance()
 
+    /**
+     * 各ネストレベルの色を選択するための ColorPanel 配列。
+     * UI 生成時に LEVEL_COUNT の数だけ行として並べます。
+     */
     private val panels = Array(BracketColorSettings.LEVEL_COUNT) { ColorPanel() }
+
+    /**
+     * dsl builder で構築される設定 UI のルートパネル。
+     * createComponent で初期化し、再利用します。
+     */
     private var root: DialogPanel? = null
 
+    /**
+     * この設定ページの一意な ID を返します。
+     * @return 設定ページ ID（検索可能設定用）
+     */
     override fun getId(): String = "com.sakakit.brackets.settings"
+
+    /**
+     * 設定ページに表示する名称を返します。
+     * @return 表示名
+     */
     override fun getDisplayName(): String = "Bracket Colorizer"
 
     /**

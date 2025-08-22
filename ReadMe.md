@@ -8,6 +8,7 @@ BracketColorizer は、JetBrains IntelliJ プラットフォーム系 IDE 向け
 - 仕組み: 言語プラグインが提供する SyntaxHighlighter を利用できる場合はコメント/文字列などを除外し、それ以外はテキスト走査で色付けします（言語非依存）。
 - カスタマイズ: 色のセットを設定から調整可能。ネストレベル数は固定（9）。
 - 目的: ネストが深いコードでも括弧の対応を素早く追えるようにし、読みやすさと保守性を向上させます。
+- 堅牢性: IDE での保存/コミットや外部再読込（例: Git 操作）後でも、自動的に色付けを再適用して表示を維持します。
 
 ## AI生成に関する告知
 本プロジェクト（ソースコードおよびこの ReadMe を含む）は、AI 支援により作成されました。初期作成および一部の更新には、JetBrains の自律型プログラマー「Junie」を用いています。
@@ -106,6 +107,7 @@ BracketColorizer is an editor-assistance plugin for JetBrains IntelliJ Platform 
 - How it works: When a language plugin provides a SyntaxHighlighter, the plugin excludes comments/strings and colors brackets accordingly; otherwise it falls back to simple text scanning (language-agnostic).
 - Customization: You can adjust the color set in settings. The number of nesting levels is fixed (9).
 - Purpose: Help you quickly follow bracket pairs even in deeply nested code, improving readability and maintainability.
+- Robustness: Coloring is preserved across IDE saves/commits and external file reloads (e.g., Git operations) via automatic re-application.
 
 ## Notice about AI generation
 This project (including source code and this ReadMe) was created with AI assistance. For the initial creation and some updates, we used JetBrains' autonomous programmer "Junie." Content has been reviewed and edited by a human as needed.

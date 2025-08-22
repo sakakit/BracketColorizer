@@ -25,12 +25,21 @@ import java.util.concurrent.ConcurrentHashMap
  * ブラケットへのレンジハイライトを更新するリスナー。
  *
  * Git 操作などによる外部再読込で色付けが消える問題に対処します。
+ * また、保存/コミット直前のイベントでも自動再適用して色付けの消失を防ぎます。
  *
  * Annotator を使わない手動ハイライト版。SyntaxHighlighter を用いて
  * コメント/文字列/ドキュメントを除外し、ネストレベルに応じた色を適用します。
  */
 class BracketColorEditorListener : EditorFactoryListener, DumbAware {
+    /**
+     * ドキュメントごとに適用中の RangeHighlighter 一覧を保持します。
+     * エディタのクローズや再読込時に確実に dispose するために参照します。
+     */
     private val highlightersMap = ConcurrentHashMap<Document, MutableList<RangeHighlighter>>()
+    /**
+     * 取り付けた DocumentListener をドキュメント単位で保持します。
+     * editorReleased でリスナーを確実に取り外すために使用します。
+     */
     private val listenersMap = ConcurrentHashMap<Document, MutableList<DocumentListener>>()
 
     init {
@@ -43,6 +52,27 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                         EditorFactory.getInstance().getEditors(document).forEach { editor ->
                             val project = editor.project ?: return@forEach
                             updateHighlights(project, document)
+                        }
+                    }
+                }
+
+                override fun beforeDocumentSaving(document: Document) {
+                    // 保存直前にハイライトがクリアされる場合に備えて再適用を予約
+                    ApplicationManager.getApplication().invokeLater {
+                        EditorFactory.getInstance().getEditors(document).forEach { editor ->
+                            val project = editor.project ?: return@forEach
+                            updateHighlights(project, document)
+                        }
+                    }
+                }
+
+                override fun beforeAllDocumentsSaving() {
+                    // すべての保存直前：コミットに伴う保存でも発火
+                    ApplicationManager.getApplication().invokeLater {
+                        // すべての開いているエディタに対して再適用
+                        EditorFactory.getInstance().allEditors.forEach { editor ->
+                            val project = editor.project ?: return@forEach
+                            updateHighlights(project, editor.document)
                         }
                     }
                 }

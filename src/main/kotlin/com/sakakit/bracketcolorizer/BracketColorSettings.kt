@@ -23,13 +23,16 @@ class BracketColorSettings : PersistentStateComponent<BracketColorSettings.State
      * colorsHex には各レベルの色を 16 進表記で保持します。
      */
     class State {
+        /**
+         * 各ネストレベルの色を #RRGGBB 形式の 16 進文字列で保持します。
+         * 初期値は defaultHexColors() の内容で、LEVEL_COUNT に合わせたサイズに調整されます。
+         */
         var colorsHex: MutableList<String> = defaultHexColors().toMutableList()
     }
 
     /**
-     * 現在のサービス状態。
-     * PersistentStateComponent の getState()/loadState() で永続化・復元されます。
-     * UI で選択された色は State.colorsHex に 16 進文字列として保持されます。
+     * 現在のサービス状態。PersistentStateComponent により保存・復元されます。
+     * UI 変更は apply()/setColor() を通じてこの状態へ反映されます。
      */
     private var myState = State()
 
