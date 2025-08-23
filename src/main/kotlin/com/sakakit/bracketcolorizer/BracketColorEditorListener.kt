@@ -439,11 +439,14 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
     /**
      * C/C++/C# 向けの簡易プリプロセッサ解析。
      * - #if 0 / #if false の無効ブロックに加え、#define SYMBOL と #if SYMBOL（および #elif SYMBOL）を簡易評価します。
-     * - これにより、#if SYMBOL が真の場合の #else ブロックも「無効」として正しく検出します。
+     * - #ifdef NAME / #ifndef NAME にも対応します（それぞれ #if defined(NAME)、#if !defined(NAME) と等価）。
+     * - これにより、#if / #ifdef / #ifndef が真の場合の #else ブロックも「無効」として正しく検出します。
      * - ネスト、#elif、#else、#endif に対応。未知の複雑な条件式は安全側（未知）として評価し、除外しません。
      * - languageId が C/C++/C# 以外の場合は空を返します。
      *
-     * 返値は [start, end]（両端含む）オフセットの昇順リスト。
+     * @param text 解析対象のテキスト全体
+     * @param languageId 言語 ID（C/C++/C# 以外は無視）
+     * @return 無効領域を表す [start, end]（両端含む）オフセットの昇順リスト
      */
     private fun computeInactivePreprocessorRanges(text: String, languageId: String?): List<IntRange> {
         fun isCLike(langId: String?): Boolean {
@@ -558,6 +561,26 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                 }
                 "if" -> {
                     val cond = evalDefinedLike(arg)
+                    val active = cond != false
+                    val known = cond != null
+                    val taken = cond == true
+                    frames.addLast(Frame(active, known, taken))
+                    if (!active) startInactive(afterLine)
+                }
+                "ifdef" -> {
+                    // #ifdef NAME  ==  #if defined(NAME)
+                    val name = arg.takeWhile { it.isLetterOrDigit() || it == '_' }
+                    val cond = if (name.isNotEmpty()) defined.contains(name) else null
+                    val active = cond != false
+                    val known = cond != null
+                    val taken = cond == true
+                    frames.addLast(Frame(active, known, taken))
+                    if (!active) startInactive(afterLine)
+                }
+                "ifndef" -> {
+                    // #ifndef NAME  ==  #if !defined(NAME)
+                    val name = arg.takeWhile { it.isLetterOrDigit() || it == '_' }
+                    val cond = if (name.isNotEmpty()) !defined.contains(name) else null
                     val active = cond != false
                     val known = cond != null
                     val taken = cond == true

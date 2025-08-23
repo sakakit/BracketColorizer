@@ -97,8 +97,8 @@ IntelliJ IDEA の場合も同様に各 IDE の plugins フォルダを使用し�
 
 ## 既知の制限（プリプロセッサ無効領域の判定）
 
-- C/C++/C# の #if/#elif/#else/#endif を簡易的に解釈しています。
-- 対応しているのは次のような単純な条件のみです: `#define`/`#undef` によるシンボルの有無、`defined(NAME)`/`defined NAME`、リテラル `0`/`1`/`true`/`false`、および単純な `SYMBOL` / `!SYMBOL`。
+- C/C++/C# の #if/#ifdef/#ifndef/#elif/#else/#endif を簡易的に解釈しています。
+- 対応しているのは次のような単純な条件のみです: `#define`/`#undef` によるシンボルの有無、`defined(NAME)`/`defined NAME`、リテラル `0`/`1`/`true`/`false`、および単純な `SYMBOL` / `!SYMBOL`。`#ifdef NAME` は `#if defined(NAME)`、`#ifndef NAME` は `#if !defined(NAME)` として扱います。
 - 複雑な条件式（数値演算・ビット演算・比較・マクロ展開など）は評価しません。そのため、実際には無効なブロック内の括弧が色付けされてしまう場合があります。
 - 設計上、不明な条件は有効扱い（フェイルセーフ）としています。誤って有効なコードの色付けを消さないための仕様です。
 
