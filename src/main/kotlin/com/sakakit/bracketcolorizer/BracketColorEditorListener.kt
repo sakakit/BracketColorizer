@@ -438,9 +438,9 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
 
     /**
      * C/C++/C# 向けの簡易プリプロセッサ解析。
-     * - #if 0 / #if false（および #elif 0 / #elif false）で明確に無効となる領域のみを抽出します。
-     * - #else / #endif による切り替え・終了に対応。ネストも対応。
-     * - 未知の条件式は評価せず（未知）として扱い、除外しません（安全側）。
+     * - #if 0 / #if false の無効ブロックに加え、#define SYMBOL と #if SYMBOL（および #elif SYMBOL）を簡易評価します。
+     * - これにより、#if SYMBOL が真の場合の #else ブロックも「無効」として正しく検出します。
+     * - ネスト、#elif、#else、#endif に対応。未知の複雑な条件式は安全側（未知）として評価し、除外しません。
      * - languageId が C/C++/C# 以外の場合は空を返します。
      *
      * 返値は [start, end]（両端含む）オフセットの昇順リスト。
@@ -453,11 +453,15 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
         }
         if (!isCLike(languageId)) return emptyList()
 
+        data class Frame(var active: Boolean, var known: Boolean, var takenTrue: Boolean)
+
         val ranges = ArrayList<IntRange>()
-        var inactiveDepth = 0
+        val frames = ArrayDeque<Frame>()
+        var inactiveLayers = 0
         var inactiveStart = -1
         var idx = 0
         val len = text.length
+        val defined = HashSet<String>()
 
         fun skipSpacesFrom(i: Int): Int {
             var j = i
@@ -490,13 +494,47 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
             val arg = text.substring(restStart, lineEnd).trim()
             return keyword to arg
         }
-        fun evalFalse(arg: String): Boolean {
-            val a = arg.lowercase()
-            return a == "0" || a == "false"
+        fun evalDefinedLike(s: String): Boolean? {
+            val a = s.trim()
+            // literals
+            when (a.lowercase()) {
+                "0", "false" -> return false
+                "1", "true" -> return true
+            }
+            // defined(NAME) or defined NAME
+            val lower = a.lowercase()
+            if (lower.startsWith("defined")) {
+                var rest = a.substring(7).trim()
+                if (rest.startsWith("(")) {
+                    rest = rest.substring(1).trim()
+                    val end = rest.indexOf(')')
+                    if (end >= 0) rest = rest.take(end)
+                }
+                val name = rest.takeWhile { it.isLetterOrDigit() || it == '_' }
+                if (name.isNotEmpty()) return defined.contains(name)
+                return null
+            }
+            // simple SYMBOL or !SYMBOL
+            var neg = false
+            var i = 0
+            if (a.isNotEmpty() && a[i] == '!') { neg = true; i++ }
+            val name = a.substring(i).takeWhile { it.isLetterOrDigit() || it == '_' }
+            if (name.isNotEmpty()) {
+                val v = defined.contains(name)
+                return if (neg) !v else v
+            }
+            return null
         }
-        fun evalTrue(arg: String): Boolean {
-            val a = arg.lowercase()
-            return a == "1" || a == "true"
+        fun startInactive(at: Int) {
+            if (inactiveLayers == 0) inactiveStart = at
+            inactiveLayers++
+        }
+        fun endInactive(uptoEndExclusiveLineStart: Int) {
+            if (inactiveLayers == 1) {
+                val end = uptoEndExclusiveLineStart - 1
+                if (inactiveStart in 0..end) ranges.add(inactiveStart..end)
+            }
+            if (inactiveLayers > 0) inactiveLayers--
         }
 
         while (idx < len) {
@@ -509,67 +547,91 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
             val (kw, arg) = directive
             val afterLine = nextLineStartFrom(lineStart)
             when (kw) {
+                "define" -> {
+                    // #define SYMBOL
+                    val name = arg.takeWhile { it.isLetterOrDigit() || it == '_' }
+                    if (name.isNotEmpty()) defined.add(name)
+                }
+                "undef" -> {
+                    val name = arg.takeWhile { it.isLetterOrDigit() || it == '_' }
+                    if (name.isNotEmpty()) defined.remove(name)
+                }
                 "if" -> {
-                    val condFalse = evalFalse(arg)
-                    if (inactiveDepth > 0) {
-                        // すでに無効領域内：ネスト深さのみ増やす
-                        inactiveDepth++
-                    } else if (condFalse) {
-                        inactiveDepth = 1
-                        // 無効領域はディレクティブ行の後から開始
-                        inactiveStart = afterLine
-                    }
-                    // cond が true/未知 の場合は何もしない（安全側）
+                    val cond = evalDefinedLike(arg)
+                    val active = cond != false
+                    val known = cond != null
+                    val taken = cond == true
+                    frames.addLast(Frame(active, known, taken))
+                    if (!active) startInactive(afterLine)
                 }
                 "elif" -> {
-                    if (inactiveDepth == 1) {
-                        // トップレベルの無効ブロック中でのみ切替を行う
-                        val condTrue = evalTrue(arg)
-                        if (condTrue) {
-                            // ここで有効化：直前までを無効として確定
-                            val end = lineStart - 1
-                            if (inactiveStart >= 0 && end >= inactiveStart) {
-                                ranges.add(inactiveStart..end)
-                            }
-                            inactiveDepth = 0
-                            inactiveStart = -1
-                        } else {
-                            // 引き続き無効（未知も無効のまま維持）
-                        }
-                    } else if (inactiveDepth > 1) {
-                        // ネスト内の elif は無視（外側が無効のため引き続き無効）
+                    if (frames.isEmpty()) {
+                        // 不一致は無視
                     } else {
-                        // 有効領域での elif は安全側で無視（ここで無効化はしない）
+                        val fr = frames.last()
+                        if (!fr.known) {
+                            // 不明条件のブロックでは安全側で変化させない
+                        } else if (fr.takenTrue) {
+                            // 既に真の分岐が取られているので、この elif は無効
+                            if (fr.active) {
+                                fr.active = false
+                                startInactive(afterLine)
+                            }
+                        } else {
+                            val cond = evalDefinedLike(arg)
+                            when (cond) {
+                                true -> {
+                                    if (!fr.active) endInactive(lineStart)
+                                    fr.active = true
+                                    fr.takenTrue = true
+                                    fr.known = true
+                                }
+                                false -> {
+                                    if (fr.active) {
+                                        fr.active = false
+                                        startInactive(afterLine)
+                                    }
+                                    fr.known = true
+                                }
+                                null -> {
+                                    // 未知: 安全側でアクティブ扱い
+                                    if (!fr.active) endInactive(lineStart)
+                                    fr.active = true
+                                    fr.known = false
+                                }
+                            }
+                        }
                     }
                 }
                 "else" -> {
-                    if (inactiveDepth == 1) {
-                        // それまでの分岐がすべて false だったため、else で有効化
-                        val end = lineStart - 1
-                        if (inactiveStart >= 0 && end >= inactiveStart) {
-                            ranges.add(inactiveStart..end)
-                        }
-                        inactiveDepth = 0
-                        inactiveStart = -1
-                    } else if (inactiveDepth > 1) {
-                        // ネスト内：引き続き無効
+                    if (frames.isEmpty()) {
+                        // 不一致は無視
                     } else {
-                        // 有効側の else は（#if true の else 無効など）安全側で無視
+                        val fr = frames.last()
+                        if (!fr.known) {
+                            // 未知条件が含まれる場合は安全側でアクティブ扱いのまま
+                        } else if (fr.takenTrue) {
+                            // 既に真の分岐が取られている -> else は無効
+                            if (fr.active) {
+                                fr.active = false
+                                startInactive(afterLine)
+                            }
+                        } else {
+                            // まだ真が取られていない -> else は有効
+                            if (!fr.active) endInactive(lineStart)
+                            fr.active = true
+                            fr.takenTrue = true
+                            fr.known = true
+                        }
                     }
                 }
                 "endif" -> {
-                    if (inactiveDepth > 0) {
-                        inactiveDepth--
-                        if (inactiveDepth == 0) {
-                            // ブロック終端で無効領域を確定
-                            val end = lineStart - 1
-                            if (inactiveStart >= 0 && end >= inactiveStart) {
-                                ranges.add(inactiveStart..end)
-                            }
-                            inactiveStart = -1
+                    if (frames.isNotEmpty()) {
+                        val fr = frames.removeLast()
+                        if (fr.known && !fr.active) {
+                            // 無効中で閉じる
+                            endInactive(lineStart)
                         }
-                    } else {
-                        // 不一致は無視
                     }
                 }
                 else -> {

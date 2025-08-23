@@ -95,6 +95,12 @@ IntelliJ IDEA の場合も同様に各 IDE の plugins フォルダを使用し�
 - 必要な前提は？
   - 通常はご利用の IDE にインストール済みの言語プラグインに依存します。開発サンドボックスの検証目的でのみ Kotlin プラグインを Gradle で同梱しています。
 
+## 既知の制限（プリプロセッサ無効領域の判定）
+
+- C/C++/C# の #if/#elif/#else/#endif を簡易的に解釈しています。
+- 対応しているのは次のような単純な条件のみです: `#define`/`#undef` によるシンボルの有無、`defined(NAME)`/`defined NAME`、リテラル `0`/`1`/`true`/`false`、および単純な `SYMBOL` / `!SYMBOL`。
+- 複雑な条件式（数値演算・ビット演算・比較・マクロ展開など）は評価しません。そのため、実際には無効なブロック内の括弧が色付けされてしまう場合があります。
+- 設計上、不明な条件は有効扱い（フェイルセーフ）としています。誤って有効なコードの色付けを消さないための仕様です。
 
 ---
 
@@ -189,3 +195,11 @@ Other tips:
 
 - Any prerequisites?
   - Normally it depends on the language plugins already installed in your IDE. For development sandbox verification only, the Kotlin plugin is bundled via Gradle.
+
+## Known limitations (inactive preprocessor regions)
+
+- C/C++/C# preprocessor conditionals (#if/#elif/#else/#endif) are interpreted using a simple heuristic.
+- Supported cases include: tracking of `#define`/`#undef`, `defined(NAME)`/`defined NAME`, literals `0`/`1`/`true`/`false`, and simple `SYMBOL` / `!SYMBOL` checks.
+- Complex expressions (arithmetic/bitwise/comparison operations), macro expansions, and similar constructs are not evaluated. As a result, blocks that are actually inactive may still get colored.
+- By design, unknown conditions are treated as active (fail-safe) to avoid accidentally removing coloring from valid code.
+
