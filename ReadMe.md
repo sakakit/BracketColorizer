@@ -101,6 +101,7 @@ IntelliJ IDEA の場合も同様に各 IDE の plugins フォルダを使用し�
 - 対応しているのは次のような単純な条件のみです: `#define`/`#undef` によるシンボルの有無、`defined(NAME)`/`defined NAME`、リテラル `0`/`1`/`true`/`false`、および単純な `SYMBOL` / `!SYMBOL`。`#ifdef NAME` は `#if defined(NAME)`、`#ifndef NAME` は `#if !defined(NAME)` として扱います。
 - 複雑な条件式（数値演算・ビット演算・比較・マクロ展開など）は評価しません。そのため、実際には無効なブロック内の括弧が色付けされてしまう場合があります。
 - 設計上、不明な条件は有効扱い（フェイルセーフ）としています。誤って有効なコードの色付けを消さないための仕様です。
+- また、現在の実装では同一ファイル内の `#define`/`#undef` のみを追跡します。プロジェクト設定や別ファイルで定義されたシンボルは検出できません。そのため、外部でのみ定義されているシンボルに対する `#ifndef SOME_SYMBOL` ブロックは有効とみなされ、色付けされる場合があります。
 
 ---
 
@@ -198,8 +199,8 @@ Other tips:
 
 ## Known limitations (inactive preprocessor regions)
 
-- C/C++/C# preprocessor conditionals (#if/#elif/#else/#endif) are interpreted using a simple heuristic.
-- Supported cases include: tracking of `#define`/`#undef`, `defined(NAME)`/`defined NAME`, literals `0`/`1`/`true`/`false`, and simple `SYMBOL` / `!SYMBOL` checks.
+- C/C++/C# preprocessor conditionals (#if/#ifdef/#ifndef/#elif/#else/#endif) are interpreted using a simple heuristic.
+- Supported cases include: tracking of `#define`/`#undef`, `defined(NAME)`/`defined NAME`, literals `0`/`1`/`true`/`false`, and simple `SYMBOL` / `!SYMBOL` checks. `#ifdef NAME` is treated as `#if defined(NAME)`, and `#ifndef NAME` is treated as `#if !defined(NAME)`.
 - Complex expressions (arithmetic/bitwise/comparison operations), macro expansions, and similar constructs are not evaluated. As a result, blocks that are actually inactive may still get colored.
-- By design, unknown conditions are treated as active (fail-safe) to avoid accidentally removing coloring from valid code.
+- By design, unknown conditions are treated as active (fail-safe) to avoid accidentally removing coloring from valid code. This also means that symbols defined outside the current file (e.g., via project/compile settings) are not detected by this heuristic; thus, a `#ifndef SOME_SYMBOL` block may still be considered active and colored if the symbol is only defined externally.
 
