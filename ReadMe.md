@@ -103,6 +103,11 @@ IntelliJ IDEA の場合も同様に各 IDE の plugins フォルダを使用し�
 - 設計上、不明な条件は有効扱い（フェイルセーフ）としています。誤って有効なコードの色付けを消さないための仕様です。
 - また、現在の実装では同一ファイル内の `#define`/`#undef` のみを追跡します。プロジェクト設定や別ファイルで定義されたシンボルは検出できません。そのため、外部でのみ定義されているシンボルに対する `#ifndef SOME_SYMBOL` ブロックは有効とみなされ、色付けされる場合があります。
 
+
+
+## 補足: マルチエディタ/差分ビュー動作
+- 同一ドキュメントを複数のエディタ（分割ビュー等）や差分ビューで開いている場合も、全ての表示に色付けが適用されます。
+
 ---
 
 # BracketColorizer — Project Overview, Build and Installation Guide (English)
@@ -204,3 +209,7 @@ Other tips:
 - Complex expressions (arithmetic/bitwise/comparison operations), macro expansions, and similar constructs are not evaluated. As a result, blocks that are actually inactive may still get colored.
 - By design, unknown conditions are treated as active (fail-safe) to avoid accidentally removing coloring from valid code. This also means that symbols defined outside the current file (e.g., via project/compile settings) are not detected by this heuristic; thus, a `#ifndef SOME_SYMBOL` block may still be considered active and colored if the symbol is only defined externally.
 
+
+
+## Notes: Multi-editor / Diff Viewer behavior
+- When the same Document is opened in multiple editors (split view) or in a diff viewer, coloring is applied to all views.

@@ -40,8 +40,8 @@ object BracketColorRefresher {
         val inst = instance ?: return
         val runnable = Runnable {
             EditorFactory.getInstance().allEditors.forEach { editor ->
-                val project = editor.project ?: return@forEach
-                inst.updateHighlights(project, editor.document)
+                // projectがnullでも色付けを適用する
+                inst.updateHighlights(editor.project, editor.document)
             }
         }
         // Ensure it runs even while a modal dialog (Settings) is open
@@ -68,10 +68,10 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
      */
     private val highlightersMap = ConcurrentHashMap<Document, MutableList<RangeHighlighter>>()
     /**
-     * 取り付けた DocumentListener をドキュメント単位で保持します。
-     * editorReleased でリスナーを確実に取り外すために使用します。
+     * 取り付けた DocumentListener をエディタ単位で保持します。
+     * editorReleased で該当エディタのリスナーのみを確実に取り外すために使用します。
      */
-    private val listenersMap = ConcurrentHashMap<Document, MutableList<DocumentListener>>()
+    private val listenersMap = ConcurrentHashMap<com.intellij.openapi.editor.Editor, DocumentListener>()
 
     init {
             BracketColorRefresher.instance = this
@@ -117,18 +117,18 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
      */
     override fun editorCreated(event: EditorFactoryEvent) {
         val editor = event.editor
-        val project = editor.project ?: return
+        val project = editor.project // nullでもOK
         val document = editor.document
         val listener = object : DocumentListener {
             override fun documentChanged(event: DocumentEvent) {
                 ApplicationManager.getApplication().invokeLater({
                     updateHighlights(project, document)
-                }, { project.isDisposed })
+                }, { project?.isDisposed == true })
             }
         }
         // attach and remember; we'll remove when editor is released
         document.addDocumentListener(listener)
-        listenersMap.computeIfAbsent(document) { mutableListOf() }.add(listener)
+        listenersMap[editor] = listener
         // initial paint
         updateHighlights(project, document)
     }
@@ -138,9 +138,21 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
      * @param event エディタ解放イベント
      */
     override fun editorReleased(event: EditorFactoryEvent) {
-        val document = event.editor.document
-        clearHighlights(document)
-        listenersMap.remove(document)?.forEach { document.removeDocumentListener(it) }
+        val editor = event.editor
+        val document = editor.document
+        // このエディタに紐づけたリスナーだけを外す
+        listenersMap.remove(editor)?.let { document.removeDocumentListener(it) }
+        // 他のエディタが残っているかで挙動を分ける
+        ApplicationManager.getApplication().invokeLater {
+            val remaining = EditorFactory.getInstance().getEditors(document)
+            if (remaining.isEmpty()) {
+                // 最後のエディタが閉じられた場合のみ、全ハイライトをクリーンアップ
+                clearHighlights(document)
+            } else {
+                // 残っているエディタのために再ハイライト（project=null で全エディタ対象）
+                updateHighlights(null, document)
+            }
+        }
     }
 
     /**
@@ -154,13 +166,18 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
     /**
      * ドキュメント全体を再解析してブラケットのレンジハイライトを張り直します。
      * SyntaxHighlighter/Lexer が利用可能な場合はそれを用い、なければテキストを単純走査します。
-     * @param project 対象プロジェクト
+     * @param project 対象プロジェクト。null の場合は該当 Document を開いている「すべてのエディタ」を対象にします。
      * @param document 対象ドキュメント
      */
-    internal fun updateHighlights(project: Project, document: Document) {
+    internal fun updateHighlights(project: Project?, document: Document) {
         clearHighlights(document)
-        val editor = EditorFactory.getInstance().getEditors(document, project).firstOrNull() ?: return
-        val markup = editor.markupModel
+        // 該当documentの全Editor（projectの有無問わず）に色付け
+        val editors = if (project != null) {
+            EditorFactory.getInstance().getEditors(document, project)
+        } else {
+            EditorFactory.getInstance().getEditors(document)
+        }
+        if (editors.isEmpty()) return
         val text = document.text
         val settings = BracketColorSettings.getInstance()
         fun enabledFor(ch: Char): Boolean = when (ch) {
@@ -170,161 +187,163 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
             '<', '>' -> settings.isAngleEnabled()
             else -> true
         }
-
-        // 新しいハイライトを先に構築し、最後に一括で差し替える
-        val newList = mutableListOf<RangeHighlighter>()
-
-        fun addRange(startOffset: Int, endOffset: Int, levelIdx: Int) {
-            val key = BracketKeys.LEVEL_KEYS[levelIdx]
-            // 既存の弱警告などより上のレイヤで描画して灰色上書きを回避
-            val rh = markup.addRangeHighlighter(
-                key,
-                startOffset,
-                endOffset,
-                HighlighterLayer.SELECTION - 1,  // 以前: HighlighterLayer.ADDITIONAL_SYNTAX
-                HighlighterTargetArea.EXACT_RANGE
-            )
-            newList.add(rh)
-        }
-
-        // PSI/レクサ取得は ReadAction 内で行い、未準備時は simpleScan にフォールバック
-        val parsedOk = ApplicationManager.getApplication().runReadAction<Boolean> {
-            val psiFile = PsiDocumentManager.getInstance(project).getPsiFile(document) ?: return@runReadAction false
-            val highlighter = SyntaxHighlighterFactory.getSyntaxHighlighter(psiFile.language, project, psiFile.virtualFile)
-            val lexer = highlighter?.highlightingLexer ?: return@runReadAction false
-// ... existing code ...
-            val openToClose = mapOf('(' to ')', '{' to '}', '[' to ']', '<' to '>')
-            val closeToOpen = openToClose.entries.associate { it.value to it.key }
-            val stack = ArrayDeque<Char>()
-            val colorIndexStack = ArrayDeque<Int>()
-
-            // ここから不足していたヘルパー関数を追加
-            fun isOperatorAngle(textIdx: Int, ch: Char): Boolean {
-                val prev = if (textIdx > 0) text[textIdx - 1] else '\u0000'
-                val next = if (textIdx + 1 < text.length) text[textIdx + 1] else '\u0000'
-                return when (ch) {
-                    '<' -> (next == '=' || next == '<') || (prev == '<' || prev == '=')
-                    '>' -> (prev == '-' || prev == '=' || prev == '>') || (next == '=' || next == '>')
-                    else -> false
-                }
+        
+        // 全エディタ分の新しいハイライターを一括で保持する
+        val combinedNewList = mutableListOf<RangeHighlighter>()
+        for (editor in editors) {
+            val markup = editor.markupModel
+            val newList = mutableListOf<RangeHighlighter>()
+            fun addRange(startOffset: Int, endOffset: Int, levelIdx: Int) {
+                val key = BracketKeys.LEVEL_KEYS[levelIdx]
+                // 既存の弱警告などより上のレイヤで描画して灰色上書きを回避
+                val rh = markup.addRangeHighlighter(
+                    key,
+                    startOffset,
+                    endOffset,
+                    HighlighterLayer.SELECTION - 1,  // 以前: HighlighterLayer.ADDITIONAL_SYNTAX
+                    HighlighterTargetArea.EXACT_RANGE
+                )
+                newList.add(rh)
             }
 
-            fun isProbableGenericOpen(textIdx: Int): Boolean {
-                // 直前直後の非空白を参照して < を型引数開始とみなすか判定
-                fun prevNonSpace(i: Int): Char? { var j=i-1; while (j>=0 && text[j].isWhitespace()) j--; return if (j>=0) text[j] else null }
-                fun nextNonSpace(i: Int): Char? { var j=i+1; while (j<text.length && text[j].isWhitespace()) j++; return if (j<text.length) text[j] else null }
-                val p = prevNonSpace(textIdx)
-                val n = nextNonSpace(textIdx)
-                val isPrevTypeish = p != null && (p.isLetterOrDigit() || p == '_' || p == ')' || p == ']' || p == '>')
-                val isNextTypeish = n != null && (n.isLetterOrDigit() || n == '_' || n == '?' || n == '(')
-                return isNextTypeish && (isPrevTypeish || p == null)
-            }
+            // PSI/レクサ取得は ReadAction 内で行い、未準備時は simpleScan にフォールバック
+            val parsedOk = if (project != null) ApplicationManager.getApplication().runReadAction<Boolean> {
+                val psiFile = PsiDocumentManager.getInstance(project).getPsiFile(document) ?: return@runReadAction false
+                val highlighter = SyntaxHighlighterFactory.getSyntaxHighlighter(psiFile.language, project, psiFile.virtualFile)
+                val lexer = highlighter?.highlightingLexer ?: return@runReadAction false
+                val openToClose = mapOf('(' to ')', '{' to '}', '[' to ']', '<' to '>')
+                val closeToOpen = openToClose.entries.associate { it.value to it.key }
+                val stack = ArrayDeque<Char>()
+                val colorIndexStack = ArrayDeque<Int>()
 
-            fun shouldTreatAsOpen(ch: Char, absIdx: Int): Boolean = when (ch) {
-                '<' -> isProbableGenericOpen(absIdx)
-                '(', '{', '[' -> true
-                else -> false
-            }
-
-            fun shouldTreatAsClose(ch: Char, absIdx: Int): Boolean = when (ch) {
-                '>' -> {
-                    // スタックに '<' がある場合は、演算子 '>>' の2つ目でも閉じ扱い
-                    if (stack.isNotEmpty() && stack.last() == '<') {
-                        true
-                    } else {
-                        !isOperatorAngle(absIdx, '>') && stack.isNotEmpty() && stack.last() == '<'
+                // ここから不足していたヘルパー関数を追加
+                fun isOperatorAngle(textIdx: Int, ch: Char): Boolean {
+                    val prev = if (textIdx > 0) text[textIdx - 1] else '\u0000'
+                    val next = if (textIdx + 1 < text.length) text[textIdx + 1] else '\u0000'
+                    return when (ch) {
+                        '<' -> (next == '=' || next == '<') || (prev == '<' || prev == '=')
+                        '>' -> (prev == '-' || prev == '=' || prev == '>') || (next == '=' || next == '>')
+                        else -> false
                     }
                 }
-                ')', '}', ']' -> stack.isNotEmpty() && openToClose[stack.last()] == ch
-                else -> false
-            }
-            // ここまで追記
-            lexer.start(text)
-            // C/C++/C# の #if 0 / #if false 無効領域を検出（Lexer 経路）
-            val inactiveRanges = computeInactivePreprocessorRanges(text, psiFile.language.id)
-            var inactiveIdx = 0
-            fun tokenIsInactive(start: Int, end: Int): Boolean {
-                while (inactiveIdx < inactiveRanges.size && inactiveRanges[inactiveIdx].last < start) {
-                    inactiveIdx++
+
+                fun isProbableGenericOpen(textIdx: Int): Boolean {
+                    // 直前直後の非空白を参照して < を型引数開始とみなすか判定
+                    fun prevNonSpace(i: Int): Char? { var j=i-1; while (j>=0 && text[j].isWhitespace()) j--; return if (j>=0) text[j] else null }
+                    fun nextNonSpace(i: Int): Char? { var j=i+1; while (j<text.length && text[j].isWhitespace()) j++; return if (j<text.length) text[j] else null }
+                    val p = prevNonSpace(textIdx)
+                    val n = nextNonSpace(textIdx)
+                    val isPrevTypeish = p != null && (p.isLetterOrDigit() || p == '_' || p == ')' || p == ']' || p == '>')
+                    val isNextTypeish = n != null && (n.isLetterOrDigit() || n == '_' || n == '?' || n == '(')
+                    return isNextTypeish && (isPrevTypeish || p == null)
                 }
-                if (inactiveIdx >= inactiveRanges.size) return false
-                val r = inactiveRanges[inactiveIdx]
-                // [start, end) と [r.first, r.last+1) の交差で判定
-                return start < (r.last + 1) && end > r.first
-            }
-            while (lexer.tokenType != null) {
-                val start = lexer.tokenStart
-                val end = lexer.tokenEnd
-                val tokenText = text.substring(start, end)
-                val isCommentOrString = isCommentOrStringToken(highlighter, lexer.tokenType!!)
-                val isInactive = tokenIsInactive(start, end)
-                if (!isCommentOrString && !isInactive) {
-                    for (i in tokenText.indices) {
-                        val ch = tokenText[i]
-                        val abs = start + i
-                        if (ch in openToClose.keys && shouldTreatAsOpen(ch, abs)) {
-                            val levelIdx = stack.size % BracketColorSettings.LEVEL_COUNT
-                            stack.addLast(ch)
-                            colorIndexStack.addLast(levelIdx)
-                            if (enabledFor(ch)) addRange(abs, abs + 1, levelIdx)
-                        } else if (ch in closeToOpen.keys) {
-                            if (ch == '>' && !shouldTreatAsClose(ch, abs)) {
-                                // skip
-                            } else {
-                                val desiredOpen = closeToOpen[ch]
-                                var levelIdxForClose: Int? = null
-                                if (stack.isNotEmpty()) {
-                                    if (stack.last() == desiredOpen) {
-                                        levelIdxForClose = colorIndexStack.removeLast()
-                                        stack.removeLast()
-                                    } else {
-                                        var found = false
-                                        while (stack.isNotEmpty()) {
-                                            val poppedOpen = stack.removeLast()
-                                            val poppedLevel = colorIndexStack.removeLast()
-                                            if (poppedOpen == desiredOpen) {
-                                                levelIdxForClose = poppedLevel
-                                                found = true
-                                                break
-                                            }
-                                        }
-                                        if (!found) levelIdxForClose = 0
-                                    }
+
+                fun shouldTreatAsOpen(ch: Char, absIdx: Int): Boolean = when (ch) {
+                    '<' -> isProbableGenericOpen(absIdx)
+                    '(', '{', '[' -> true
+                    else -> false
+                }
+
+                fun shouldTreatAsClose(ch: Char, absIdx: Int): Boolean = when (ch) {
+                    '>' -> {
+                        // スタックに '<' がある場合は、演算子 '>>' の2つ目でも閉じ扱い
+                        if (stack.isNotEmpty() && stack.last() == '<') {
+                            true
+                        } else {
+                            !isOperatorAngle(absIdx, '>') && stack.isNotEmpty() && stack.last() == '<'
+                        }
+                    }
+                    ')', '}', ']' -> stack.isNotEmpty() && openToClose[stack.last()] == ch
+                    else -> false
+                }
+                // ここまで追記
+                lexer.start(text)
+                // C/C++/C# の #if 0 / #if false 無効領域を検出（Lexer 経路）
+                val inactiveRanges = computeInactivePreprocessorRanges(text, psiFile.language.id)
+                var inactiveIdx = 0
+                fun tokenIsInactive(start: Int, end: Int): Boolean {
+                    while (inactiveIdx < inactiveRanges.size && inactiveRanges[inactiveIdx].last < start) {
+                        inactiveIdx++
+                    }
+                    if (inactiveIdx >= inactiveRanges.size) return false
+                    val r = inactiveRanges[inactiveIdx]
+                    // [start, end) と [r.first, r.last+1) の交差で判定
+                    return start < (r.last + 1) && end > r.first
+                }
+                while (lexer.tokenType != null) {
+                    val start = lexer.tokenStart
+                    val end = lexer.tokenEnd
+                    val tokenText = text.substring(start, end)
+                    val isCommentOrString = isCommentOrStringToken(highlighter, lexer.tokenType!!)
+                    val isInactive = tokenIsInactive(start, end)
+                    if (!isCommentOrString && !isInactive) {
+                        for (i in tokenText.indices) {
+                            val ch = tokenText[i]
+                            val abs = start + i
+                            if (ch in openToClose.keys && shouldTreatAsOpen(ch, abs)) {
+                                val levelIdx = stack.size % BracketColorSettings.LEVEL_COUNT
+                                stack.addLast(ch)
+                                colorIndexStack.addLast(levelIdx)
+                                if (enabledFor(ch)) addRange(abs, abs + 1, levelIdx)
+                            } else if (ch in closeToOpen.keys) {
+                                if (ch == '>' && !shouldTreatAsClose(ch, abs)) {
+                                    // skip
                                 } else {
-                                    levelIdxForClose = 0
+                                    val desiredOpen = closeToOpen[ch]
+                                    var levelIdxForClose: Int? = null
+                                    if (stack.isNotEmpty()) {
+                                        if (stack.last() == desiredOpen) {
+                                            levelIdxForClose = colorIndexStack.removeLast()
+                                            stack.removeLast()
+                                        } else {
+                                            var found = false
+                                            while (stack.isNotEmpty()) {
+                                                val poppedOpen = stack.removeLast()
+                                                val poppedLevel = colorIndexStack.removeLast()
+                                                if (poppedOpen == desiredOpen) {
+                                                    levelIdxForClose = poppedLevel
+                                                    found = true
+                                                    break
+                                                }
+                                            }
+                                            if (!found) levelIdxForClose = 0
+                                        }
+                                    } else {
+                                        levelIdxForClose = 0
+                                    }
+                                    if (enabledFor(ch)) addRange(abs, abs + 1, levelIdxForClose!!)
                                 }
-                                if (enabledFor(ch)) addRange(abs, abs + 1, levelIdxForClose!!)
                             }
                         }
                     }
+                    lexer.advance()
                 }
-                lexer.advance()
-            }
-            true
-        }
+                true
+            } else false
 
-        if (!parsedOk) {
-            // フォールバック（PSI/レクサ未準備や Dumb モードなど）
-            // C/C++/C# の無効プリプロセッサ領域を検出し、オフセットを除外
-            val inactiveRanges = computeInactivePreprocessorRanges(text, null)
-            var rIdx = 0
-            fun isInactiveOffset(off: Int): Boolean {
-                while (rIdx < inactiveRanges.size && inactiveRanges[rIdx].last < off) rIdx++
-                if (rIdx >= inactiveRanges.size) return false
-                val r = inactiveRanges[rIdx]
-                return off >= r.first && off <= r.last
-            }
-            simpleScan(text) { offset, levelIdx ->
-                if (!isInactiveOffset(offset)) {
-                    val ch = text[offset]
-                    if (enabledFor(ch)) addRange(offset, offset + 1, levelIdx)
+            if (!parsedOk) {
+                // フォールバック（PSI/レクサ未準備や Dumb モードなど）
+                // C/C++/C# の無効プリプロセッサ領域を検出し、オフセットを除外
+                val inactiveRanges = computeInactivePreprocessorRanges(text, null)
+                var rIdx = 0
+                fun isInactiveOffset(off: Int): Boolean {
+                    while (rIdx < inactiveRanges.size && inactiveRanges[rIdx].last < off) rIdx++
+                    if (rIdx >= inactiveRanges.size) return false
+                    val r = inactiveRanges[rIdx]
+                    return off >= r.first && off <= r.last
+                }
+                simpleScan(text) { offset, levelIdx ->
+                    if (!isInactiveOffset(offset)) {
+                        val ch = text[offset]
+                        if (enabledFor(ch)) addRange(offset, offset + 1, levelIdx)
+                    }
                 }
             }
+            // このエディタで作成したハイライターを合算
+            combinedNewList.addAll(newList)
         }
-
-        // ここで旧ハイライトを破棄してから新リストを登録（消えっぱなしを防止）
-        clearHighlights(document)
-        highlightersMap[document] = newList
+        // 旧ハイライトを破棄済みなので、新規をまとめて登録
+        highlightersMap[document] = combinedNewList
     }
 
     /**
