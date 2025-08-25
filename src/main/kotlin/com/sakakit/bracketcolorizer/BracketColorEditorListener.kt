@@ -217,25 +217,66 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                 val colorIndexStack = ArrayDeque<Int>()
 
                 // ここから不足していたヘルパー関数を追加
+                fun prevNonSpace(i: Int): Char? { var j=i-1; while (j>=0 && text[j].isWhitespace()) j--; return if (j>=0) text[j] else null }
+                fun nextNonSpace(i: Int): Char? { var j=i+1; while (j<text.length && text[j].isWhitespace()) j++; return if (j<text.length) text[j] else null }
+                fun isOperandChar(c: Char?): Boolean {
+                    if (c == null) return false
+                    return c.isLetterOrDigit() || c == '_' || c == ')' || c == ']' || c == '}' || c == '"' || c == '\''
+                }
                 fun isOperatorAngle(textIdx: Int, ch: Char): Boolean {
-                    val prev = if (textIdx > 0) text[textIdx - 1] else '\u0000'
-                    val next = if (textIdx + 1 < text.length) text[textIdx + 1] else '\u0000'
+                    val p = prevNonSpace(textIdx)
+                    val n = nextNonSpace(textIdx)
                     return when (ch) {
-                        '<' -> (next == '=' || next == '<') || (prev == '<' || prev == '=')
-                        '>' -> (prev == '-' || prev == '=' || prev == '>') || (next == '=' || next == '>')
+                        '<' -> {
+                            // Treat as operator for <=, <<, or when surrounded by operands and not a probable generic/XML open
+                            if (n == '=' || n == '<' || p == '<' || p == '=') true
+                            else if (n != null && n.isDigit()) true // a < 10
+                            else if (isOperandChar(p) && isOperandChar(n)) true // a < b
+                            else false
+                        }
+                        '>' -> {
+                            // Treat as operator for >=, >>, -> and when surrounded by operands
+                            if (p == '-' || p == '=' || p == '>' || n == '=' || n == '>') true
+                            else if (isOperandChar(p) && isOperandChar(n)) true // 20 > b, x>y
+                            else false
+                        }
                         else -> false
                     }
                 }
 
                 fun isProbableGenericOpen(textIdx: Int): Boolean {
-                    // 直前直後の非空白を参照して < を型引数開始とみなすか判定
-                    fun prevNonSpace(i: Int): Char? { var j=i-1; while (j>=0 && text[j].isWhitespace()) j--; return if (j>=0) text[j] else null }
-                    fun nextNonSpace(i: Int): Char? { var j=i+1; while (j<text.length && text[j].isWhitespace()) j++; return if (j<text.length) text[j] else null }
+                    // Use stricter heuristic to avoid comparisons like "a < 10" or "a < b"
                     val p = prevNonSpace(textIdx)
                     val n = nextNonSpace(textIdx)
-                    val isPrevTypeish = p != null && (p.isLetterOrDigit() || p == '_' || p == ')' || p == ']' || p == '>')
-                    val isNextTypeish = n != null && (n.isLetterOrDigit() || n == '_' || n == '?' || n == '(')
-                    return isNextTypeish && (isPrevTypeish || p == null)
+                    // Next cannot be a digit for generics
+                    if (n == null || n.isDigit()) return false
+                    // Next should be identifier-ish or '?' or '(' (for e.g., Java diamonds in casts are rare but keep simple)
+                    val nextOk = n.isLetter() || n == '_' || n == '?' || n == '('
+                    if (!nextOk) return false
+                    // Previous can be identifier-ish or end-of-line/file or one of ") ] >" or none (XML tag at start)
+                    val prevOk = (p == null) || p.isLetterOrDigit() || p == '_' || p == ')' || p == ']' || p == '>'
+                    if (!prevOk) return false
+                    // Lookahead to find a matching '>' without disallowed operators in between
+                    var i = textIdx + 1
+                    var depth = 1
+                    var seenLetter = false
+                    while (i < text.length) {
+                        val c = text[i]
+                        if (c == '\n' || c == '\r') break
+                        if (c == '<') depth++
+                        else if (c == '>') {
+                            depth--
+                            if (depth == 0) break
+                        }
+                        // Disallow obvious operator characters inside generic candidate
+                        if (c == '|' || c == '&' || c == '=' || c == '+' || c == '-' || c == '*' || c == '/' || c == ':' || c == '!') return false
+                        if (c.isLetter()) seenLetter = true
+                        i++
+                    }
+                    if (i >= text.length || depth != 0) return false
+                    // Ensure there was at least one letter inside the angle section
+                    if (!seenLetter) return false
+                    return true
                 }
 
                 fun shouldTreatAsOpen(ch: Char, absIdx: Int): Boolean = when (ch) {
@@ -369,24 +410,57 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
     private fun simpleScan(text: String, onBracket: (offset: Int, levelIdx: Int) -> Unit) {
         val stack = ArrayDeque<Char>()
         val colorIndexStack = ArrayDeque<Int>()
+        fun prevNonSpace(i: Int): Char? { var j=i-1; while (j>=0 && text[j].isWhitespace()) j--; return if (j>=0) text[j] else null }
+        fun nextNonSpace(i: Int): Char? { var j=i+1; while (j<text.length && text[j].isWhitespace()) j++; return if (j<text.length) text[j] else null }
+        fun isOperandChar(c: Char?): Boolean {
+            if (c == null) return false
+            return c.isLetterOrDigit() || c == '_' || c == ')' || c == ']' || c == '}' || c == '"' || c == '\''
+        }
         fun isOperatorAngle(idx: Int, ch: Char): Boolean {
-            val prev = if (idx > 0) text[idx - 1] else '\u0000'
-            val next = if (idx + 1 < text.length) text[idx + 1] else '\u0000'
+            val p = prevNonSpace(idx)
+            val n = nextNonSpace(idx)
             return when (ch) {
-                '<' -> (next == '=' || next == '<') || (prev == '<' || prev == '=')
-                '>' -> (prev == '-' || prev == '=' || prev == '>') || (next == '=' || next == '>')
+                '<' -> {
+                    if (n == '=' || n == '<' || p == '<' || p == '=') true
+                    else if (n != null && n.isDigit()) true
+                    else if (isOperandChar(p) && isOperandChar(n)) true
+                    else false
+                }
+                '>' -> {
+                    if (p == '-' || p == '=' || p == '>' || n == '=' || n == '>') true
+                    else if (isOperandChar(p) && isOperandChar(n)) true
+                    else false
+                }
                 else -> false
             }
         }
         fun isProbableGenericOpen(idx: Int): Boolean {
             if (isOperatorAngle(idx, '<')) return false
-            fun prevNonSpace(i: Int): Char? { var j=i-1; while (j>=0 && text[j].isWhitespace()) j--; return if (j>=0) text[j] else null }
-            fun nextNonSpace(i: Int): Char? { var j=i+1; while (j<text.length && text[j].isWhitespace()) j++; return if (j<text.length) text[j] else null }
             val p = prevNonSpace(idx)
             val n = nextNonSpace(idx)
-            val isPrevTypeish = p != null && (p.isLetterOrDigit() || p == '_' || p == ')' || p == ']' || p == '>')
-            val isNextTypeish = n != null && (n.isLetterOrDigit() || n == '_' || n == '?' || n == '(')
-            return isNextTypeish && (isPrevTypeish || p == null)
+            if (n == null || n.isDigit()) return false
+            val nextOk = n.isLetter() || n == '_' || n == '?' || n == '('
+            if (!nextOk) return false
+            val prevOk = (p == null) || p.isLetterOrDigit() || p == '_' || p == ')' || p == ']' || p == '>'
+            if (!prevOk) return false
+            var i = idx + 1
+            var depth = 1
+            var seenLetter = false
+            while (i < text.length) {
+                val c = text[i]
+                if (c == '\n' || c == '\r') break
+                if (c == '<') depth++
+                else if (c == '>') {
+                    depth--
+                    if (depth == 0) break
+                }
+                if (c == '|' || c == '&' || c == '=' || c == '+' || c == '-' || c == '*' || c == '/' || c == ':' || c == '!') return false
+                if (c.isLetter()) seenLetter = true
+                i++
+            }
+            if (i >= text.length || depth != 0) return false
+            if (!seenLetter) return false
+            return true
         }
         for (i in text.indices) {
             val ch = text[i]
