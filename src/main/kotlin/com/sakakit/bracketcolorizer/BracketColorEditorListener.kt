@@ -220,6 +220,13 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                 val stack = ArrayDeque<Char>()
                 val colorIndexStack = ArrayDeque<Int>()
 
+                // 言語IDからマークアップ言語を判定
+                fun isMarkupLanguageId(id: String?): Boolean {
+                    val s = id?.lowercase() ?: return false
+                    return s.contains("xml") || s.contains("html") || s.contains("xhtml") || s.contains("xaml")
+                }
+                val markupMode = settings.isMarkupTagMode() && isMarkupLanguageId(psiFile.language.id)
+
                 // ここから不足していたヘルパー関数を追加
                 fun prevNonSpace(i: Int): Char? { var j=i-1; while (j>=0 && text[j].isWhitespace()) j--; return if (j>=0) text[j] else null }
                 fun nextNonSpace(i: Int): Char? { var j=i+1; while (j<text.length && text[j].isWhitespace()) j++; return if (j<text.length) text[j] else null }
@@ -284,18 +291,23 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                 }
 
                 fun shouldTreatAsOpen(ch: Char, absIdx: Int): Boolean = when (ch) {
-                    '<' -> isProbableGenericOpen(absIdx)
+                    '<' -> if (markupMode) true else isProbableGenericOpen(absIdx)
                     '(', '{', '[' -> true
                     else -> false
                 }
 
                 fun shouldTreatAsClose(ch: Char, absIdx: Int): Boolean = when (ch) {
                     '>' -> {
-                        // スタックに '<' がある場合は、演算子 '>>' の2つ目でも閉じ扱い
-                        if (stack.isNotEmpty() && stack.last() == '<') {
+                        if (markupMode) {
+                            // マークアップモードでは常にタグ閉じとして扱う
                             true
                         } else {
-                            !isOperatorAngle(absIdx, '>') && stack.isNotEmpty() && stack.last() == '<'
+                            // スタックに '<' がある場合は、演算子 '>>' の2つ目でも閉じ扱い
+                            if (stack.isNotEmpty() && stack.last() == '<') {
+                                true
+                            } else {
+                                !isOperatorAngle(absIdx, '>') && stack.isNotEmpty() && stack.last() == '<'
+                            }
                         }
                     }
                     ')', '}', ']' -> stack.isNotEmpty() && openToClose[stack.last()] == ch
@@ -379,7 +391,29 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                     val r = inactiveRanges[rIdx]
                     return off >= r.first && off <= r.last
                 }
-                simpleScan(text) { offset, levelIdx ->
+                fun looksLikeMarkup(s: String): Boolean {
+                    // 簡易判定: "<" の直後に / or ? or ! or 英字 が続くパターンが複数あればマークアップとみなす
+                    var i = 0
+                    var hits = 0
+                    val len = s.length
+                    while (i < len - 1) {
+                        if (s[i] == '<') {
+                            var j = i + 1
+                            while (j < len && s[j].isWhitespace()) j++
+                            if (j < len) {
+                                val c = s[j]
+                                if (c == '/' || c == '!' || c == '?' || c.isLetter()) {
+                                    hits++
+                                    if (hits >= 2) return true
+                                }
+                            }
+                        }
+                        i++
+                    }
+                    return hits >= 1 // 1つでもあれば弱く判定
+                }
+                val isMarkupByText = settings.isMarkupTagMode() && looksLikeMarkup(text)
+                simpleScan(text, isMarkupByText) { offset, levelIdx ->
                     if (!isInactiveOffset(offset)) {
                         val ch = text[offset]
                         if (enabledFor(ch)) addRange(offset, offset + 1, levelIdx)
@@ -432,9 +466,10 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
      * 簡易スキャナでテキスト全体を走査し、ブラケット検出時にコールバックします（Lexer 不使用）。
      * - 角括弧は演算子との簡易判定を行います。
      * @param text 対象テキスト
+     * @param isMarkup マークアップ文書として扱う場合は true（< と > を常に括弧として扱う）
      * @param onBracket ブラケット検出時に呼ばれるコールバック（オフセットとレベル）
      */
-    private fun simpleScan(text: String, onBracket: (offset: Int, levelIdx: Int) -> Unit) {
+    private fun simpleScan(text: String, isMarkup: Boolean, onBracket: (offset: Int, levelIdx: Int) -> Unit) {
         val stack = ArrayDeque<Char>()
         val colorIndexStack = ArrayDeque<Int>()
         fun prevNonSpace(i: Int): Char? { var j=i-1; while (j>=0 && text[j].isWhitespace()) j--; return if (j>=0) text[j] else null }
@@ -492,28 +527,44 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
         for (i in text.indices) {
             val ch = text[i]
             if (ch == '<') {
-                if (isProbableGenericOpen(i)) {
+                if (isMarkup || isProbableGenericOpen(i)) {
                     val levelIdx = stack.size % BracketColorSettings.LEVEL_COUNT
                     stack.addLast(ch)
                     colorIndexStack.addLast(levelIdx)
                     onBracket(i, levelIdx)
                 }
             } else if (ch == '>') {
-                // スタック上に '<' があれば、'>>' の2つ目であってもジェネリクスの閉じとして扱う
-                if (stack.isNotEmpty() && stack.last() == '<') {
+                if (isMarkup) {
+                    // マークアップでは常に閉じ扱い
                     var levelIdxForClose: Int? = null
-                    while (stack.isNotEmpty()) {
-                        val poppedOpen = stack.removeLast()
-                        val poppedLevel = colorIndexStack.removeLast()
-                        if (poppedOpen == '<') {
-                            levelIdxForClose = poppedLevel
-                            break
+                    if (stack.isNotEmpty()) {
+                        while (stack.isNotEmpty()) {
+                            val poppedOpen = stack.removeLast()
+                            val poppedLevel = colorIndexStack.removeLast()
+                            if (poppedOpen == '<') {
+                                levelIdxForClose = poppedLevel
+                                break
+                            }
                         }
                     }
                     onBracket(i, levelIdxForClose ?: 0)
-                } else if (!isOperatorAngle(i, '>')) {
-                    // '<' が積まれていない場合のみ、演算子判定に従って閉じ扱い
-                    onBracket(i, 0)
+                } else {
+                    // スタック上に '<' があれば、'>>' の2つ目であってもジェネリクスの閉じとして扱う
+                    if (stack.isNotEmpty() && stack.last() == '<') {
+                        var levelIdxForClose: Int? = null
+                        while (stack.isNotEmpty()) {
+                            val poppedOpen = stack.removeLast()
+                            val poppedLevel = colorIndexStack.removeLast()
+                            if (poppedOpen == '<') {
+                                levelIdxForClose = poppedLevel
+                                break
+                            }
+                        }
+                        onBracket(i, levelIdxForClose ?: 0)
+                    } else if (!isOperatorAngle(i, '>')) {
+                        // '<' が積まれていない場合のみ、演算子判定に従って閉じ扱い
+                        onBracket(i, 0)
+                    }
                 }
             } else if (ch == '(' || ch == '{' || ch == '[') {
                 val levelIdx = stack.size % BracketColorSettings.LEVEL_COUNT

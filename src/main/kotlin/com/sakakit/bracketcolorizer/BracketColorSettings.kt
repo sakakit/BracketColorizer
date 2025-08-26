@@ -34,6 +34,8 @@ class BracketColorSettings : PersistentStateComponent<BracketColorSettings.State
         var enableSquare: Boolean = true  // []
         var enableCurly: Boolean = true   // {}
         var enableAngle: Boolean = true   // <>
+        /** マークアップ言語で < > を常にタグ括弧として扱う（演算子ヒューリスティックを無効化） */
+        var markupTagMode: Boolean = true
     }
 
     /**
@@ -115,6 +117,12 @@ class BracketColorSettings : PersistentStateComponent<BracketColorSettings.State
     fun isAngleEnabled(): Boolean = myState.enableAngle
 
     /**
+     * マークアップ言語でタグモードが有効かを返します。
+     * @return 有効な場合は true、無効な場合は false
+     */
+    fun isMarkupTagMode(): Boolean = myState.markupTagMode
+
+    /**
      * 丸括弧 () の色付けを有効/無効に設定します。
      * @param value true で有効、false で無効
      */
@@ -137,6 +145,12 @@ class BracketColorSettings : PersistentStateComponent<BracketColorSettings.State
      * @param value true で有効、false で無効
      */
     fun setAngleEnabled(value: Boolean) { myState.enableAngle = value }
+
+    /**
+     * マークアップ言語タグモードの設定。
+     * @param value true で有効、false で無効
+     */
+    fun setMarkupTagMode(value: Boolean) { myState.markupTagMode = value }
 
     /**
      * colorsHex のサイズを LEVEL_COUNT 以上に拡張します。

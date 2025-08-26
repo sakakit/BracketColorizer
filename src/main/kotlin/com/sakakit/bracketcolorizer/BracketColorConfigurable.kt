@@ -45,6 +45,8 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
     private val cbCurly = JBCheckBox("{}")
     /** 括弧タイプごとの有効/無効チェックボックス（山括弧）。*/
     private val cbAngle = JBCheckBox("<>")
+    /** マークアップタグモード（XML/XAML/HTMLで< >を常にタグとして扱う） */
+    private val cbMarkupTagMode = JBCheckBox("Treat <> as tags in XML/HTML/XAML (markup mode)")
 
     /**
      * この設定ページの一意な ID を返します。
@@ -73,6 +75,11 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
                         cell(cbAngle)
                     }
                 }
+                group("Markup languages (XML/HTML/XAML)") {
+                    row {
+                        cell(cbMarkupTagMode)
+                    }
+                }
                 for (i in 0 until BracketColorSettings.LEVEL_COUNT) {
                     row("Level ${i + 1}") {
                         cell(panels[i])
@@ -98,6 +105,7 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
         if (cbSquare.isSelected != settings.isSquareEnabled()) return true
         if (cbCurly.isSelected != settings.isCurlyEnabled()) return true
         if (cbAngle.isSelected != settings.isAngleEnabled()) return true
+        if (cbMarkupTagMode.isSelected != settings.isMarkupTagMode()) return true
         return false
     }
 
@@ -113,6 +121,7 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
         settings.setSquareEnabled(cbSquare.isSelected)
         settings.setCurlyEnabled(cbCurly.isSelected)
         settings.setAngleEnabled(cbAngle.isSelected)
+        settings.setMarkupTagMode(cbMarkupTagMode.isSelected)
 
         settings.applyColorsToScheme()
         // 既存のアノテーション系再起動（念のため）
@@ -136,5 +145,6 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
         cbSquare.isSelected = settings.isSquareEnabled()
         cbCurly.isSelected = settings.isCurlyEnabled()
         cbAngle.isSelected = settings.isAngleEnabled()
+        cbMarkupTagMode.isSelected = settings.isMarkupTagMode()
     }
 }
