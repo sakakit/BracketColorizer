@@ -44,7 +44,7 @@ object BracketColorRefresher {
                 inst.updateHighlights(editor.project, editor.document)
             }
         }
-        // Ensure it runs even while a modal dialog (Settings) is open
+        // 設定などのモーダルダイアログ表示中でも必ず実行されるようにする
         ApplicationManager.getApplication()
             .invokeLater(runnable, com.intellij.openapi.application.ModalityState.any())
     }
@@ -126,10 +126,10 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                 }, { project?.isDisposed == true })
             }
         }
-        // attach and remember; we'll remove when editor is released
+        // リスナーを取り付けて保持（エディタ解放時に取り外し）
         document.addDocumentListener(listener)
         listenersMap[editor] = listener
-        // initial paint
+        // 初期描画（最初の色付け適用）
         updateHighlights(project, document)
     }
 
@@ -149,8 +149,9 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                 // 最後のエディタが閉じられた場合のみ、全ハイライトをクリーンアップ
                 clearHighlights(document)
             } else {
-                // 残っているエディタのために再ハイライト（project=null で全エディタ対象）
-                updateHighlights(null, document)
+                // 残っているエディタのために再ハイライト。可能ならプロジェクトを引き継ぐ
+                val proj = remaining.first().project
+                updateHighlights(proj, document)
             }
         }
     }
@@ -200,16 +201,19 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                     key,
                     startOffset,
                     endOffset,
-                    HighlighterLayer.SELECTION - 1,  // 以前: HighlighterLayer.ADDITIONAL_SYNTAX
+                    HighlighterLayer.SELECTION,
                     HighlighterTargetArea.EXACT_RANGE
                 )
                 newList.add(rh)
             }
 
+            // このエディタに紐づくプロジェクトを優先的に使用（外部から null 指定の場合の対策）
+            val projForEditor = editor.project ?: project
+
             // PSI/レクサ取得は ReadAction 内で行い、未準備時は simpleScan にフォールバック
-            val parsedOk = if (project != null) ApplicationManager.getApplication().runReadAction<Boolean> {
-                val psiFile = PsiDocumentManager.getInstance(project).getPsiFile(document) ?: return@runReadAction false
-                val highlighter = SyntaxHighlighterFactory.getSyntaxHighlighter(psiFile.language, project, psiFile.virtualFile)
+            val parsedOk = if (projForEditor != null) ApplicationManager.getApplication().runReadAction<Boolean> {
+                val psiFile = PsiDocumentManager.getInstance(projForEditor).getPsiFile(document) ?: return@runReadAction false
+                val highlighter = SyntaxHighlighterFactory.getSyntaxHighlighter(psiFile.language, projForEditor, psiFile.virtualFile)
                 val lexer = highlighter?.highlightingLexer ?: return@runReadAction false
                 val openToClose = mapOf('(' to ')', '{' to '}', '[' to ']', '<' to '>')
                 val closeToOpen = openToClose.entries.associate { it.value to it.key }
@@ -228,14 +232,14 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                     val n = nextNonSpace(textIdx)
                     return when (ch) {
                         '<' -> {
-                            // Treat as operator for <=, <<, or when surrounded by operands and not a probable generic/XML open
+                            // 演算子（<=, << など）や前後がオペランドの比較の場合は演算子扱い。汎用/XML の開始と判定できない場合
                             if (n == '=' || n == '<' || p == '<' || p == '=') true
                             else if (n != null && n.isDigit()) true // a < 10
                             else if (isOperandChar(p) && isOperandChar(n)) true // a < b
                             else false
                         }
                         '>' -> {
-                            // Treat as operator for >=, >>, -> and when surrounded by operands
+                            // 演算子（>=, >>, -> など）や前後がオペランドの比較の場合は演算子扱い
                             if (p == '-' || p == '=' || p == '>' || n == '=' || n == '>') true
                             else if (isOperandChar(p) && isOperandChar(n)) true // 20 > b, x>y
                             else false
@@ -245,18 +249,18 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                 }
 
                 fun isProbableGenericOpen(textIdx: Int): Boolean {
-                    // Use stricter heuristic to avoid comparisons like "a < 10" or "a < b"
+                    // "a < 10" や "a < b" のような比較を避けるため、厳しめのヒューリスティックを用いる
                     val p = prevNonSpace(textIdx)
                     val n = nextNonSpace(textIdx)
-                    // Next cannot be a digit for generics
+                    // 次の文字が数字であればジェネリクスではない
                     if (n == null || n.isDigit()) return false
-                    // Next should be identifier-ish or '?' or '(' (for e.g., Java diamonds in casts are rare but keep simple)
+                    // 次は識別子風の文字、または '?'、'(' であるべき（ざっくり判定）
                     val nextOk = n.isLetter() || n == '_' || n == '?' || n == '('
                     if (!nextOk) return false
-                    // Previous can be identifier-ish or end-of-line/file or one of ") ] >" or none (XML tag at start)
+                    // 前は識別子風・行/ファイルの終端・") ] >" のいずれか（XML タグ開始なども許容）
                     val prevOk = (p == null) || p.isLetterOrDigit() || p == '_' || p == ')' || p == ']' || p == '>'
                     if (!prevOk) return false
-                    // Lookahead to find a matching '>' without disallowed operators in between
+                    // 先読みして不許可の演算子を含まない '>' 対応を探す
                     var i = textIdx + 1
                     var depth = 1
                     var seenLetter = false
@@ -268,13 +272,13 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                             depth--
                             if (depth == 0) break
                         }
-                        // Disallow obvious operator characters inside generic candidate
+                        // ジェネリクス候補内に明らかな演算子文字が現れたら除外
                         if (c == '|' || c == '&' || c == '=' || c == '+' || c == '-' || c == '*' || c == '/' || c == ':' || c == '!') return false
                         if (c.isLetter()) seenLetter = true
                         i++
                     }
                     if (i >= text.length || depth != 0) return false
-                    // Ensure there was at least one letter inside the angle section
+                    // 角括弧区間内に少なくとも1文字の英字が含まれていることを保証
                     if (!seenLetter) return false
                     return true
                 }
@@ -302,7 +306,7 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                 // C/C++/C# の #if 0 / #if false 無効領域を検出（Lexer 経路）
                 val inactiveRanges = computeInactivePreprocessorRanges(text, psiFile.language.id)
                 var inactiveIdx = 0
-                fun tokenIsInactive(start: Int, end: Int): Boolean {
+                fun tokenIsInactiveByRange(start: Int, end: Int): Boolean {
                     while (inactiveIdx < inactiveRanges.size && inactiveRanges[inactiveIdx].last < start) {
                         inactiveIdx++
                     }
@@ -315,9 +319,11 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                     val start = lexer.tokenStart
                     val end = lexer.tokenEnd
                     val tokenText = text.substring(start, end)
-                    val isCommentOrString = isCommentOrStringToken(highlighter, lexer.tokenType!!)
-                    val isInactive = tokenIsInactive(start, end)
-                    if (!isCommentOrString && !isInactive) {
+                    val tokenType = lexer.tokenType!!
+                    val isCommentOrString = isCommentOrStringToken(highlighter, tokenType)
+                    val isInactiveByRange = tokenIsInactiveByRange(start, end)
+                    val isInactiveByLexer = tokenIsInactiveByLexer(highlighter, tokenType, psiFile.language.id)
+                    if (!isCommentOrString && !isInactiveByRange && !isInactiveByLexer) {
                         for (i in tokenText.indices) {
                             val ch = tokenText[i]
                             val abs = start + i
@@ -397,7 +403,28 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
         val keys = highlighter.getTokenHighlights(tokenType)
         return keys.any { key ->
             val name = key.externalName
-            name.contains("COMMENT", true) || name.contains("STRING", true) || name.contains("DOC", true)
+            // コメント/文字列/ドキュメントは常にスキップ対象（言語共通）
+            name.contains("COMMENT", true) ||
+            name.contains("STRING", true) ||
+            name.contains("DOC", true)
+        }
+    }
+
+    /**
+     * レキサが付ける無効コード属性（INACTIVE/DISABLED/ PREPROCESSOR_INACTIVE）を検出します。
+     * ただし C# では信頼できない場合があるため、C# では常に false を返し、
+     * レンジベースの無効検出（computeInactivePreprocessorRanges）に委ねます。
+     */
+    private fun tokenIsInactiveByLexer(highlighter: SyntaxHighlighter, tokenType: IElementType, languageId: String?): Boolean {
+        // 備考: Rider の C# では SyntaxHighlighter の無効コード属性が信頼できない場合があるため、ここでは C# を除外しレンジベース検出に委ねます。
+        val isCSharp = languageId?.lowercase()?.let { it.contains("c#") || it.contains("csharp") } == true
+        if (isCSharp) return false
+        val keys = highlighter.getTokenHighlights(tokenType)
+        return keys.any { key ->
+            val name = key.externalName
+            name.contains("INACTIVE", true) ||
+            name.contains("DISABLED", true) ||
+            name.contains("PREPROCESSOR_INACTIVE", true)
         }
     }
 
@@ -558,6 +585,7 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
         var idx = 0
         val len = text.length
         val defined = HashSet<String>()
+        val knownNames = HashSet<String>()
 
         fun skipSpacesFrom(i: Int): Int {
             var j = i
@@ -607,7 +635,9 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                     if (end >= 0) rest = rest.take(end)
                 }
                 val name = rest.takeWhile { it.isLetterOrDigit() || it == '_' }
-                if (name.isNotEmpty()) return defined.contains(name)
+                if (name.isNotEmpty()) {
+                    return if (knownNames.contains(name)) defined.contains(name) else null
+                }
                 return null
             }
             // simple SYMBOL or !SYMBOL
@@ -616,6 +646,7 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
             if (a.isNotEmpty() && a[i] == '!') { neg = true; i++ }
             val name = a.substring(i).takeWhile { it.isLetterOrDigit() || it == '_' }
             if (name.isNotEmpty()) {
+                if (!knownNames.contains(name)) return null
                 val v = defined.contains(name)
                 return if (neg) !v else v
             }
@@ -646,7 +677,10 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                 "define" -> {
                     // #define SYMBOL
                     val name = arg.takeWhile { it.isLetterOrDigit() || it == '_' }
-                    if (name.isNotEmpty()) defined.add(name)
+                    if (name.isNotEmpty()) {
+                        defined.add(name)
+                        knownNames.add(name)
+                    }
                 }
                 "undef" -> {
                     val name = arg.takeWhile { it.isLetterOrDigit() || it == '_' }
@@ -663,7 +697,9 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                 "ifdef" -> {
                     // #ifdef NAME  ==  #if defined(NAME)
                     val name = arg.takeWhile { it.isLetterOrDigit() || it == '_' }
-                    val cond = if (name.isNotEmpty()) defined.contains(name) else null
+                    val cond: Boolean? = if (name.isNotEmpty()) {
+                        if (knownNames.contains(name)) defined.contains(name) else null
+                    } else null
                     val active = cond != false
                     val known = cond != null
                     val taken = cond == true
@@ -673,7 +709,9 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                 "ifndef" -> {
                     // #ifndef NAME  ==  #if !defined(NAME)
                     val name = arg.takeWhile { it.isLetterOrDigit() || it == '_' }
-                    val cond = if (name.isNotEmpty()) !defined.contains(name) else null
+                    val cond: Boolean? = if (name.isNotEmpty()) {
+                        if (knownNames.contains(name)) !defined.contains(name) else null
+                    } else null
                     val active = cond != false
                     val known = cond != null
                     val taken = cond == true

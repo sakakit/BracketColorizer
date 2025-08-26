@@ -15,7 +15,7 @@ class ApplyColorsStartup : ProjectActivity {
      * @param project 対象のプロジェクト
      */
     override suspend fun execute(project: Project) {
-        // Ensure the scheme has our colors applied at startup
+        // 起動時点でカラースキームに本プラグインの色を反映しておく
         BracketColorSettings.getInstance().applyColorsToScheme()
     }
 }

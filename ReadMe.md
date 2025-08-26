@@ -5,7 +5,7 @@
 ## このプラグインについて
 BracketColorizer は、JetBrains IntelliJ プラットフォーム系 IDE 向けのエディタ支援プラグインです。ソースコード内の括弧をネストの深さに応じて色分けし、対応関係を視覚的に把握しやすくします。
 - 対応括弧: (), [], {}, <>（< > は文脈に応じて簡易判定）
-- 仕組み: 言語プラグインが提供する SyntaxHighlighter を利用できる場合はコメント/文字列などを除外し、それ以外はテキスト走査で色付けします（言語非依存）。
+- 仕組み: 言語プラグインが提供する SyntaxHighlighter を利用できる場合はコメント/文字列/ドキュメントおよび無効コード（言語プラグインが非アクティブとしてトークン化する領域）を除外し、それ以外はテキスト走査で色付けします（言語非依存）。
 - カスタマイズ: 色のセットを設定から調整可能。括弧タイプごと（(), [], {}, <>）の色付け有効/無効も設定できます。ネストレベル数は固定（9）。
 - 目的: ネストが深いコードでも括弧の対応を素早く追えるようにし、読みやすさと保守性を向上させます。
 - 堅牢性: IDE での保存/コミットや外部再読込（例: Git 操作）後でも、自動的に色付けを再適用して表示を維持します。
@@ -102,6 +102,7 @@ IntelliJ IDEA の場合も同様に各 IDE の plugins フォルダを使用し�
 - 複雑な条件式（数値演算・ビット演算・比較・マクロ展開など）は評価しません。そのため、実際には無効なブロック内の括弧が色付けされてしまう場合があります。
 - 設計上、不明な条件は有効扱い（フェイルセーフ）としています。誤って有効なコードの色付けを消さないための仕様です。
 - また、現在の実装では同一ファイル内の `#define`/`#undef` のみを追跡します。プロジェクト設定や別ファイルで定義されたシンボルは検出できません。そのため、外部でのみ定義されているシンボルに対する `#ifndef SOME_SYMBOL` ブロックは有効とみなされ、色付けされる場合があります。
+- ただし、言語プラグインのレキサが無効コードを明示的にトークン化（INACTIVE/DISABLED 等）する場合、その領域は色付け対象から除外されます。
 
 
 
@@ -117,7 +118,7 @@ This document provides an overview of the plugin, how to build it, and instructi
 ## About this plugin
 BracketColorizer is an editor-assistance plugin for JetBrains IntelliJ Platform IDEs. It colorizes brackets in source code based on nesting depth to make matching pairs easier to visually track.
 - Supported brackets: (), [], {}, <> (angle brackets are heuristically distinguished depending on context)
-- How it works: When a language plugin provides a SyntaxHighlighter, the plugin excludes comments/strings and colors brackets accordingly; otherwise it falls back to simple text scanning (language-agnostic).
+- How it works: When a language plugin provides a SyntaxHighlighter, the plugin excludes comments/strings/doc and inactive-code tokens (as marked by the language plugin) and colors brackets accordingly; otherwise it falls back to simple text scanning (language-agnostic).
 - Customization: You can adjust the color set in settings. You can also enable/disable coloring per bracket type ((), [], {}, <>). The number of nesting levels is fixed (9).
 - Purpose: Help you quickly follow bracket pairs even in deeply nested code, improving readability and maintainability.
 - Robustness: Coloring is preserved across IDE saves/commits and external file reloads (e.g., Git operations) via automatic re-application.
@@ -208,6 +209,7 @@ Other tips:
 - Supported cases include: tracking of `#define`/`#undef`, `defined(NAME)`/`defined NAME`, literals `0`/`1`/`true`/`false`, and simple `SYMBOL` / `!SYMBOL` checks. `#ifdef NAME` is treated as `#if defined(NAME)`, and `#ifndef NAME` is treated as `#if !defined(NAME)`.
 - Complex expressions (arithmetic/bitwise/comparison operations), macro expansions, and similar constructs are not evaluated. As a result, blocks that are actually inactive may still get colored.
 - By design, unknown conditions are treated as active (fail-safe) to avoid accidentally removing coloring from valid code. This also means that symbols defined outside the current file (e.g., via project/compile settings) are not detected by this heuristic; thus, a `#ifndef SOME_SYMBOL` block may still be considered active and colored if the symbol is only defined externally.
+- However, if the language plugin’s lexer explicitly marks tokens as inactive (e.g., INACTIVE/DISABLED), those regions are excluded from coloring.
 
 
 

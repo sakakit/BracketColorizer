@@ -108,7 +108,7 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
         for (i in 0 until BracketColorSettings.LEVEL_COUNT) {
             settings.setColor(i, panels[i].selectedColor ?: JBColor.BLACK)
         }
-        // Save bracket-type flags
+        // 括弧タイプの有効/無効フラグを保存
         settings.setRoundEnabled(cbRound.isSelected)
         settings.setSquareEnabled(cbSquare.isSelected)
         settings.setCurlyEnabled(cbCurly.isSelected)
@@ -116,7 +116,7 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
 
         settings.applyColorsToScheme()
         // 既存のアノテーション系再起動（念のため）
-        // Restart for all open projects instead of null to ensure immediate refresh
+        // すべての開いているプロジェクトに対してデーモンを再起動（即時反映のため）
         com.intellij.openapi.project.ProjectManager.getInstance().openProjects.forEach {
             DaemonCodeAnalyzer.getInstance(it).restart()
         }
