@@ -88,9 +88,13 @@ IntelliJ IDEA の場合も同様に各 IDE の plugins フォルダを使用し�
 - 個別対応は必要ですか？
   - いいえ。本プラグインは言語非依存の実装です。各ファイルの言語に対して SyntaxHighlighter（各言語プラグインが提供）を利用できる場合は、それを使ってコメント/文字列を除外しつつ括弧を色付けします。利用できない場合は、フォールバックとしてテキストの単純走査で色付けします。
 
+- 新機能: マークアップ・タグモード（XML/HTML/XAML）
+  - Settings > Bracket Colorizer に「Treat <> as tags in XML/HTML/XAML (markup mode)」を追加しました。ON の場合、これらのマークアップ言語では '<' と '>' を常にタグの括弧として扱い、比較/シフト演算子とのヒューリスティック判定をスキップします。コメント/文字列/無効トークンは従来どおり除外されます。
+  - フォールバック（レキサが利用できない時）でも、文書がマークアップらしいと判定できた場合は同様の挙動に切り替えます（簡易判定）。
+
 - 精度の違いは？
-  - 言語プラグインあり: コメント/文字列・ドキュメント領域を除外し、< > は演算子との簡易判定を行うため、より自然な見た目になります。
-  - 言語プラグインなし: テキスト走査のみのため、コメント/文字列内の括弧も色付けされる場合があります。
+    - 言語プラグインあり: コメント/文字列・ドキュメント領域を除外し、< > は演算子との簡易判定を行うため、より自然な見た目になります。
+    - 言語プラグインなし: テキスト走査のみのため、コメント/文字列内の括弧も色付けされる場合があります。
 
 - 必要な前提は？
   - 通常はご利用の IDE にインストール済みの言語プラグインに依存します。開発サンドボックスの検証目的でのみ Kotlin プラグインを Gradle で同梱しています。
@@ -195,6 +199,10 @@ Other tips:
 
 - Do I need per-language support?  
   - No. The plugin is language-agnostic. If a SyntaxHighlighter is available for a file's language (provided by its language plugin), it is used to exclude comments/strings while coloring brackets. If not available, the plugin falls back to simple text scanning.
+
+- New: Markup Tag Mode (XML/HTML/XAML)
+  - Added Settings > Bracket Colorizer: “Treat <> as tags in XML/HTML/XAML (markup mode)”. When ON, in these markup languages '<' and '>' are always treated as tag brackets, skipping the heuristic for comparison/shift operators. Comments/strings/inactive tokens are still excluded as before.
+  - In fallback mode (when a lexer is not available), if the document appears to be markup, the same behavior is applied (simple detection).
 
 - Any difference in accuracy?
   - With a language plugin: Comments/strings/doc areas are excluded, and angle brackets are heuristically distinguished from operators, resulting in a more natural look.
