@@ -290,16 +290,49 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                     return true
                 }
 
+                fun lineStartFrom(index: Int): Int {
+                    var i = index
+                    while (i > 0 && text[i - 1] != '\n' && text[i - 1] != '\r') i--
+                    return i
+                }
+                fun isIncludeLineAt(index: Int, langId: String?): Boolean {
+                    // 対象言語: C/C++/Objective-C/無指定（フォールバック）
+                    val okLang = if (langId == null) true else run {
+                        val id = langId.lowercase()
+                        id == "c" || id.contains("cpp") || id.contains("c++") || id.contains("objective")
+                    }
+                    if (!okLang) return false
+                    val ls = lineStartFrom(index)
+                    var j = ls
+                    // 行頭の空白をスキップ
+                    while (j < text.length && (text[j] == ' ' || text[j] == '\t')) j++
+                    // '#' に続く 'include' or 'import'
+                    if (j >= text.length || text[j] != '#') return false
+                    j++
+                    while (j < text.length && (text[j] == ' ' || text[j] == '\t')) j++
+                    val kwStart = j
+                    while (j < text.length && text[j].isLetter()) j++
+                    val kw = text.substring(kwStart, j).lowercase()
+                    if (kw != "include" && kw != "import") return false
+                    // コメント記号 '//' が行頭〜index の間にある場合は無視
+                    var k = kwStart
+                    while (k < index && k < text.length - 1) {
+                        if (text[k] == '/' && text[k + 1] == '/') return false
+                        k++
+                    }
+                    return true
+                }
+
                 fun shouldTreatAsOpen(ch: Char, absIdx: Int): Boolean = when (ch) {
-                    '<' -> if (markupMode) true else isProbableGenericOpen(absIdx)
+                    '<' -> if (markupMode || isIncludeLineAt(absIdx, psiFile.language.id)) true else isProbableGenericOpen(absIdx)
                     '(', '{', '[' -> true
                     else -> false
                 }
 
                 fun shouldTreatAsClose(ch: Char, absIdx: Int): Boolean = when (ch) {
                     '>' -> {
-                        if (markupMode) {
-                            // マークアップモードでは常にタグ閉じとして扱う
+                        if (markupMode || isIncludeLineAt(absIdx, psiFile.language.id)) {
+                            // マークアップ/インクルード行では常に閉じ扱い
                             true
                         } else {
                             // スタックに '<' がある場合は、演算子 '>>' の2つ目でも閉じ扱い
@@ -524,17 +557,40 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
             if (!seenLetter) return false
             return true
         }
+        fun lineStartFrom(index: Int): Int {
+            var i = index
+            while (i > 0 && text[i - 1] != '\n' && text[i - 1] != '\r') i--
+            return i
+        }
+        fun isIncludeLineAt(index: Int): Boolean {
+            val ls = lineStartFrom(index)
+            var j = ls
+            while (j < text.length && (text[j] == ' ' || text[j] == '\t')) j++
+            if (j >= text.length || text[j] != '#') return false
+            j++
+            while (j < text.length && (text[j] == ' ' || text[j] == '\t')) j++
+            val kwStart = j
+            while (j < text.length && text[j].isLetter()) j++
+            val kw = text.substring(kwStart, j).lowercase()
+            if (kw != "include" && kw != "import") return false
+            var k = kwStart
+            while (k < index && k < text.length - 1) {
+                if (text[k] == '/' && text[k + 1] == '/') return false
+                k++
+            }
+            return true
+        }
         for (i in text.indices) {
             val ch = text[i]
             if (ch == '<') {
-                if (isMarkup || isProbableGenericOpen(i)) {
+                if (isMarkup || isIncludeLineAt(i) || isProbableGenericOpen(i)) {
                     val levelIdx = stack.size % BracketColorSettings.LEVEL_COUNT
                     stack.addLast(ch)
                     colorIndexStack.addLast(levelIdx)
                     onBracket(i, levelIdx)
                 }
             } else if (ch == '>') {
-                if (isMarkup) {
+                if (isMarkup || isIncludeLineAt(i)) {
                     // マークアップでは常に閉じ扱い
                     var levelIdxForClose: Int? = null
                     if (stack.isNotEmpty()) {
