@@ -47,6 +47,8 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
     private val cbAngle = JBCheckBox("<>")
     /** マークアップタグモード（XML/XAML/HTMLで< >を常にタグとして扱う） */
     private val cbMarkupTagMode = JBCheckBox("Treat <> as tags in XML/HTML/XAML (markup mode)")
+    /** C/C++ 系の #include/#import 行における <> の色付け */
+    private val cbIncludeAngle = JBCheckBox("Colorize <> in C/C++ #include/#import")
 
     /**
      * この設定ページの一意な ID を返します。
@@ -76,9 +78,10 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
                     }
                 }
                 group("Markup languages (XML/HTML/XAML)") {
-                    row {
-                        cell(cbMarkupTagMode)
-                    }
+                    row { cell(cbMarkupTagMode) }
+                }
+                group("C/C++ includes") {
+                    row { cell(cbIncludeAngle) }
                 }
                 for (i in 0 until BracketColorSettings.LEVEL_COUNT) {
                     row("Level ${i + 1}") {
@@ -106,6 +109,7 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
         if (cbCurly.isSelected != settings.isCurlyEnabled()) return true
         if (cbAngle.isSelected != settings.isAngleEnabled()) return true
         if (cbMarkupTagMode.isSelected != settings.isMarkupTagMode()) return true
+        if (cbIncludeAngle.isSelected != settings.isIncludeAngleEnabled()) return true
         return false
     }
 
@@ -122,6 +126,7 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
         settings.setCurlyEnabled(cbCurly.isSelected)
         settings.setAngleEnabled(cbAngle.isSelected)
         settings.setMarkupTagMode(cbMarkupTagMode.isSelected)
+        settings.setIncludeAngleEnabled(cbIncludeAngle.isSelected)
 
         settings.applyColorsToScheme()
         // 既存のアノテーション系再起動（念のため）
@@ -146,5 +151,6 @@ class BracketColorConfigurable : SearchableConfigurable, Configurable.NoScroll, 
         cbCurly.isSelected = settings.isCurlyEnabled()
         cbAngle.isSelected = settings.isAngleEnabled()
         cbMarkupTagMode.isSelected = settings.isMarkupTagMode()
+        cbIncludeAngle.isSelected = settings.isIncludeAngleEnabled()
     }
 }

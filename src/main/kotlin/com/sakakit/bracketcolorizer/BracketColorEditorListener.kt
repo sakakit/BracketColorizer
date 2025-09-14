@@ -185,7 +185,6 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
             '(', ')' -> settings.isRoundEnabled()
             '{', '}' -> settings.isCurlyEnabled()
             '[', ']' -> settings.isSquareEnabled()
-            '<', '>' -> settings.isAngleEnabled()
             else -> true
         }
         
@@ -376,7 +375,10 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                                 val levelIdx = stack.size % BracketColorSettings.LEVEL_COUNT
                                 stack.addLast(ch)
                                 colorIndexStack.addLast(levelIdx)
-                                if (enabledFor(ch)) addRange(abs, abs + 1, levelIdx)
+                                val allow = if (ch == '<') {
+                                    if (isIncludeLineAt(abs, psiFile.language.id)) settings.isIncludeAngleEnabled() else settings.isAngleEnabled()
+                                } else enabledFor(ch)
+                                if (allow) addRange(abs, abs + 1, levelIdx)
                             } else if (ch in closeToOpen.keys) {
                                 if (ch == '>' && !shouldTreatAsClose(ch, abs)) {
                                     // skip
@@ -403,7 +405,10 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                                     } else {
                                         levelIdxForClose = 0
                                     }
-                                    if (enabledFor(ch)) addRange(abs, abs + 1, levelIdxForClose!!)
+                                    val allowClose = if (ch == '>') {
+                                        if (isIncludeLineAt(abs, psiFile.language.id)) settings.isIncludeAngleEnabled() else settings.isAngleEnabled()
+                                    } else enabledFor(ch)
+                                    if (allowClose) addRange(abs, abs + 1, levelIdxForClose!!)
                                 }
                             }
                         }
@@ -446,10 +451,33 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
                     return hits >= 1 // 1つでもあれば弱く判定
                 }
                 val isMarkupByText = settings.isMarkupTagMode() && looksLikeMarkup(text)
+                fun lineStartFrom(index: Int): Int { var i=index; while (i>0 && text[i-1] != '\n' && text[i-1] != '\r') i--; return i }
+                fun isIncludeLineAt(index: Int): Boolean {
+                    val ls = lineStartFrom(index)
+                    var j = ls
+                    while (j < text.length && (text[j] == ' ' || text[j] == '\t')) j++
+                    if (j >= text.length || text[j] != '#') return false
+                    j++
+                    while (j < text.length && (text[j] == ' ' || text[j] == '\t')) j++
+                    val kwStart = j
+                    while (j < text.length && text[j].isLetter()) j++
+                    val kw = text.substring(kwStart, j).lowercase()
+                    if (kw != "include" && kw != "import") return false
+                    var k = kwStart
+                    while (k < index && k < text.length - 1) { if (text[k] == '/' && text[k+1] == '/') return false; k++ }
+                    return true
+                }
                 simpleScan(text, isMarkupByText) { offset, levelIdx ->
                     if (!isInactiveOffset(offset)) {
                         val ch = text[offset]
-                        if (enabledFor(ch)) addRange(offset, offset + 1, levelIdx)
+                        val allow = when (ch) {
+                            '(' , ')' -> settings.isRoundEnabled()
+                            '{' , '}' -> settings.isCurlyEnabled()
+                            '[' , ']' -> settings.isSquareEnabled()
+                            '<' , '>' -> if (isIncludeLineAt(offset)) settings.isIncludeAngleEnabled() else settings.isAngleEnabled()
+                            else -> true
+                        }
+                        if (allow) addRange(offset, offset + 1, levelIdx)
                     }
                 }
             }

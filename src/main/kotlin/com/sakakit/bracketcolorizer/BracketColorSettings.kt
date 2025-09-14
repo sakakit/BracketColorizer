@@ -34,6 +34,8 @@ class BracketColorSettings : PersistentStateComponent<BracketColorSettings.State
         var enableSquare: Boolean = true  // []
         var enableCurly: Boolean = true   // {}
         var enableAngle: Boolean = true   // <>
+        /** C/C++ 系の #include/#import 行における <> の色付けを独立して制御 */
+        var enableIncludeAngle: Boolean = true // #include <...> 専用
         /** マークアップ言語で < > を常にタグ括弧として扱う（演算子ヒューリスティックを無効化） */
         var markupTagMode: Boolean = true
     }
@@ -117,6 +119,11 @@ class BracketColorSettings : PersistentStateComponent<BracketColorSettings.State
     fun isAngleEnabled(): Boolean = myState.enableAngle
 
     /**
+     * #include/#import 行における山括弧 <> の色付けが有効かどうか。
+     */
+    fun isIncludeAngleEnabled(): Boolean = myState.enableIncludeAngle
+
+    /**
      * マークアップ言語でタグモードが有効かを返します。
      * @return 有効な場合は true、無効な場合は false
      */
@@ -145,6 +152,11 @@ class BracketColorSettings : PersistentStateComponent<BracketColorSettings.State
      * @param value true で有効、false で無効
      */
     fun setAngleEnabled(value: Boolean) { myState.enableAngle = value }
+
+    /**
+     * #include/#import 行の <> 色付け設定。
+     */
+    fun setIncludeAngleEnabled(value: Boolean) { myState.enableIncludeAngle = value }
 
     /**
      * マークアップ言語タグモードの設定。
