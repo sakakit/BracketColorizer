@@ -74,7 +74,7 @@ class BracketColorEditorListener : EditorFactoryListener, DumbAware {
     private val listenersMap = ConcurrentHashMap<com.intellij.openapi.editor.Editor, DocumentListener>()
 
     init {
-            BracketColorRefresher.instance = this
+        BracketColorRefresher.instance = this
         // Git 操作などによる外部再読込で色付けが消える問題への対処
         ApplicationManager.getApplication().messageBus.connect()
             .subscribe(FileDocumentManagerListener.TOPIC, object : FileDocumentManagerListener {
